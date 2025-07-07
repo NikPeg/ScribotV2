@@ -4,9 +4,24 @@ from aiogram.filters import StateFilter
 from aiogram.types import Message, CallbackQuery
 
 from core import OrderStates
-from keyboards import get_pages_keyboard, get_work_type_keyboard, get_model_keyboard, get_main_menu_keyboard
+from keyboards import get_pages_keyboard, get_work_type_keyboard, get_model_keyboard, get_back_to_menu_keyboard
 
 order_router = Router()
+
+@order_router.message(StateFilter(None), F.text)
+async def handle_direct_theme(message: Message, state: FSMContext):
+    """
+    Этот хендлер ловит любое текстовое сообщение от пользователя,
+    если он не находится ни в каком состоянии (StateFilter(None)).
+    Он воспринимает это сообщение как тему для работы.
+    """
+    await state.update_data(theme=message.text)
+    await message.answer(
+        text="Тему принял. Теперь выберите желаемый объем работы:",
+        reply_markup=get_pages_keyboard()
+    )
+    await state.set_state(OrderStates.GET_PAGES)
+
 
 @order_router.message(StateFilter(OrderStates.GET_THEME))
 async def handle_theme(message: Message, state: FSMContext):
@@ -88,7 +103,7 @@ async def handle_model(callback: CallbackQuery, state: FSMContext):
 
     await callback.message.answer(
         text="Вы можете вернуться в главное меню.",
-        reply_markup=get_main_menu_keyboard()
+        reply_markup=get_back_to_menu_keyboard()
     )
 
     await state.clear()

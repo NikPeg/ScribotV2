@@ -1,7 +1,7 @@
 from aiogram.types import InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-# Этот файл содержит функции для создания и возврата всех inline-клавиатур бота.
+from core import settings
 
 def get_main_menu_keyboard():
     """Возвращает клавиатуру для главного меню."""
@@ -9,8 +9,28 @@ def get_main_menu_keyboard():
     builder.button(
         text="📝 Сгенерировать работу", callback_data="generate_work"
     )
-    # Здесь можно будет добавить другие кнопки, например "О боте", "Поддержка"
-    builder.adjust(1)
+    builder.button(
+        text="❓Узнать о Scribo", callback_data="info"
+    )
+    builder.button(
+        text="🤗Чат юзеров", url=settings.chat_url
+    )
+    builder.button(
+        text="📚Отзывы о боте", url=settings.feedback_url
+    )
+    builder.button(
+        text="🆘Поддержка", url=settings.sos_url
+    )
+    # Расположение: 1, 2, 2
+    builder.adjust(1, 2, 2)
+    return builder.as_markup()
+
+def get_back_to_menu_keyboard():
+    """Возвращает клавиатуру с одной кнопкой "Назад в меню"."""
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="🏠 Главное меню", callback_data="main_menu"
+    )
     return builder.as_markup()
 
 def get_pages_keyboard():

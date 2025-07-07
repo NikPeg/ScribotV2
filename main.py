@@ -3,14 +3,18 @@ import logging
 import sys
 
 from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
 from core import settings
 from handlers import routers_list
 
 async def main() -> None:
-    # Инициализация бота и диспетчера
-    bot = Bot(token=settings.bot_token, parse_mode=ParseMode.HTML)
+    # Инициализация бота с новыми настройками по умолчанию
+    bot = Bot(
+        token=settings.bot_token,
+        default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+    )
     dp = Dispatcher()
 
     # Включаем все роутеры из списка
