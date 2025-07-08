@@ -7,30 +7,29 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
 from core import settings
+from core.settings import LogLevel
 from handlers import routers_list
+from middlewares.logging_middleware import AdminLoggingMiddleware
 
 async def main() -> None:
-    # Инициализация бота с новыми настройками по умолчанию
     bot = Bot(
         token=settings.bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML)
     )
     dp = Dispatcher()
 
-    # Включаем все роутеры из списка
+    # Проверяем, нужно ли вообще включать логирование
+    if settings.log_level == LogLevel.ALL:
+        # .outer_middleware() сработает для любого входящего события
+        dp.update.outer_middleware(AdminLoggingMiddleware())
+
     dp.include_routers(*routers_list)
 
-    # Удаляем вебхук, если он был установлен ранее, чтобы не мешать поллингу
     await bot.delete_webhook(drop_pending_updates=True)
-
-    # Запускаем поллинг
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
-    # Настраиваем логирование
     logging.basicConfig(level=logging.INFO, stream=sys.stdout)
-
-    # Запускаем асинхронную функцию main
     try:
         asyncio.run(main())
     except KeyboardInterrupt:

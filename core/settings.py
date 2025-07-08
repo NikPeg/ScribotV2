@@ -1,10 +1,19 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from enum import Enum
+
+class LogLevel(str, Enum):
+    """Определяет возможные уровни логирования в чат админа."""
+    ALL = 'all'
+    NONE = 'none'
 
 class Settings(BaseSettings):
     bot_token: str
     chat_url: str
     feedback_url: str
     sos_url: str
+
+    admin_id: int
+    log_level: LogLevel = LogLevel.ALL
 
     # Список примеров тем для работ.
     sample_works: list[str] = [
