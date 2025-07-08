@@ -96,4 +96,4 @@ async def handle_generate_work(callback: CallbackQuery, state: FSMContext):
 
     await callback.message.edit_text(text=text)
     await callback.answer()
-    await send_admin_log(callback.bot, callback.from_user, "Нажал кнопку 'Сгенерировать работу'")
+    await send_admin_log(callback.bot, callback.from_user, "Нажал кнопку 'Сгенерировать работу' (0)")

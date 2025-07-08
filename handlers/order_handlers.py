@@ -34,7 +34,7 @@ async def handle_theme(message: Message, state: FSMContext):
         reply_markup=get_pages_keyboard()
     )
     await state.set_state(OrderStates.GET_PAGES)
-    await send_admin_log(message.bot, message.from_user, "Выбрал тему")
+    await send_admin_log(message.bot, message.from_user, "Выбрал тему (1)")
 
 
 @order_router.callback_query(StateFilter(OrderStates.GET_PAGES), F.data.startswith("pages:"))
@@ -47,7 +47,7 @@ async def handle_pages(callback: CallbackQuery, state: FSMContext):
     )
     await state.set_state(OrderStates.GET_TYPE)
     await callback.answer()
-    await send_admin_log(callback.bot, callback.from_user, "Выбрал число страниц")
+    await send_admin_log(callback.bot, callback.from_user, "Выбрал число страниц (2)")
 
 
 @order_router.callback_query(StateFilter(OrderStates.GET_TYPE), F.data == "back_to_pages")
@@ -58,7 +58,7 @@ async def back_to_pages(callback: CallbackQuery, state: FSMContext):
     )
     await state.set_state(OrderStates.GET_PAGES)
     await callback.answer()
-    await send_admin_log(callback.bot, callback.from_user, "Выбрал объем")
+    await send_admin_log(callback.bot, callback.from_user, "Выбрал объем (3)")
 
 
 @order_router.callback_query(StateFilter(OrderStates.GET_TYPE), F.data.startswith("type:"))
@@ -71,7 +71,7 @@ async def handle_work_type(callback: CallbackQuery, state: FSMContext):
     )
     await state.set_state(OrderStates.GET_MODEL)
     await callback.answer()
-    await send_admin_log(callback.bot, callback.from_user, "Выбрал тип работы")
+    await send_admin_log(callback.bot, callback.from_user, "Выбрал тип (3)")
 
 
 @order_router.callback_query(StateFilter(OrderStates.GET_MODEL), F.data == "back_to_type")
@@ -82,7 +82,7 @@ async def back_to_type(callback: CallbackQuery, state: FSMContext):
     )
     await state.set_state(OrderStates.GET_TYPE)
     await callback.answer()
-    await send_admin_log(callback.bot, callback.from_user, "Выбрал модель")
+    await send_admin_log(callback.bot, callback.from_user, "Выбрал модель (5)")
 
 
 @order_router.callback_query(StateFilter(OrderStates.GET_MODEL), F.data.startswith("model:"))
