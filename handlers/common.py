@@ -3,6 +3,8 @@ from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.types import Message, CallbackQuery
 
+import random
+from core import settings
 from core import OrderStates
 from keyboards import get_main_menu_keyboard, get_back_to_menu_keyboard
 
@@ -74,8 +76,17 @@ async def handle_info(update: Message | CallbackQuery):
 
 @common_router.callback_query(F.data == "generate_work")
 async def handle_generate_work(callback: CallbackQuery, state: FSMContext):
+    """Обработчик, запускающий процесс создания работы."""
     await state.set_state(OrderStates.GET_THEME)
-    await callback.message.edit_text(
-        text="Отлично! 🚀\n\nПришлите мне тему вашей будущей работы."
+
+    # Выбираем случайный пример из настроек
+    random_example = random.choice(settings.sample_works)
+
+    # Формируем новый текст сообщения
+    text = (
+        "✨<b>Введи название нужной тебе работы!</b>✨\n\n"
+        f"📝Пример: <code>{random_example}</code>"
     )
+
+    await callback.message.edit_text(text=text)
     await callback.answer()

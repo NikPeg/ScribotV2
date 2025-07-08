@@ -17,7 +17,7 @@ async def handle_direct_theme(message: Message, state: FSMContext):
     """
     await state.update_data(theme=message.text)
     await message.answer(
-        text="Тему принял. Теперь выберите желаемый объем работы:",
+        text="Тему принял. Теперь выберите желаемый <b>объем работы</b>:",
         reply_markup=get_pages_keyboard()
     )
     await state.set_state(OrderStates.GET_PAGES)
@@ -27,7 +27,7 @@ async def handle_direct_theme(message: Message, state: FSMContext):
 async def handle_theme(message: Message, state: FSMContext):
     await state.update_data(theme=message.text)
     await message.answer(
-        text="Тему принял. Теперь выберите желаемый объем работы:",
+        text="Тему принял. Теперь выберите желаемый <b>объем работы</b>:",
         reply_markup=get_pages_keyboard()
     )
     await state.set_state(OrderStates.GET_PAGES)
@@ -38,7 +38,7 @@ async def handle_pages(callback: CallbackQuery, state: FSMContext):
     pages = callback.data.split(":")[1]
     await state.update_data(pages=pages)
     await callback.message.edit_text(
-        text="Отлично! Укажите тип работы:",
+        text="Отлично! Укажите <b>тип работы</b>:",
         reply_markup=get_work_type_keyboard()
     )
     await state.set_state(OrderStates.GET_TYPE)
@@ -60,7 +60,7 @@ async def handle_work_type(callback: CallbackQuery, state: FSMContext):
     work_type = callback.data.split(":")[1]
     await state.update_data(work_type=work_type)
     await callback.message.edit_text(
-        text="Почти готово! Выберите модель для генерации:",
+        text="Почти готово! Выберите <b>модель</b> для генерации:",
         reply_markup=get_model_keyboard()
     )
     await state.set_state(OrderStates.GET_MODEL)
@@ -70,7 +70,7 @@ async def handle_work_type(callback: CallbackQuery, state: FSMContext):
 @order_router.callback_query(StateFilter(OrderStates.GET_MODEL), F.data == "back_to_type")
 async def back_to_type(callback: CallbackQuery, state: FSMContext):
     await callback.message.edit_text(
-        text="Укажите тип работы:",
+        text="Укажите <b>тип работы</b>:",
         reply_markup=get_work_type_keyboard()
     )
     await state.set_state(OrderStates.GET_TYPE)
@@ -96,8 +96,8 @@ async def handle_model(callback: CallbackQuery, state: FSMContext):
     await callback.answer("Заказ подтвержден")
 
     await callback.message.answer(
-        text="⏳ Начинаю генерацию... Это может занять несколько минут.\n\n"
-             "<i>(На данном этапе это сообщение-заглушка)</i>",
+        text="❤Спасибо! Работа начинает генерироваться. Пожалуйста, ожидайте!\n" \
+             "⏳Среднее время создания работы — 10 минут.\n",
         parse_mode="HTML"
     )
 
