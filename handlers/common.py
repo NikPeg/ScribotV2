@@ -7,6 +7,7 @@ import random
 from core import settings
 from core import OrderStates
 from keyboards import get_main_menu_keyboard, get_back_to_menu_keyboard
+from utils.admin_logger import send_admin_log
 
 common_router = Router()
 
@@ -46,12 +47,14 @@ async def handle_start(message: Message, state: FSMContext):
         text=START_MESSAGE,
         reply_markup=get_main_menu_keyboard()
     )
+    await send_admin_log(message.bot, message.from_user, "Нажал /start")
 
 @common_router.callback_query(F.data == "main_menu")
 async def handle_menu(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     await callback.message.edit_text(text=MENU_MESSAGE, reply_markup=get_main_menu_keyboard())
     await callback.answer()
+    await send_admin_log(callback.bot, callback.from_user, "Нажал кнопку 'Вернуться в меню'")
 
 
 @common_router.message(Command("cancel"))
@@ -61,6 +64,7 @@ async def handle_cancel(message: Message, state: FSMContext):
         "Действие отменено. Вы возвращены в главное меню.",
         reply_markup=get_main_menu_keyboard()
     )
+    await send_admin_log(message.bot, message.from_user, "Нажал /cancel")
 
 
 @common_router.message(Command("help"))
@@ -69,9 +73,11 @@ async def handle_info(update: Message | CallbackQuery):
     # Универсальный обработчик для /help и кнопки "О Scribo"
     if isinstance(update, Message):
         await update.answer(text=INFO_MESSAGE, reply_markup=get_back_to_menu_keyboard(), disable_web_page_preview=True)
+        await send_admin_log(update.bot, update.from_user, "Нажал /help")
     else:
         await update.message.edit_text(text=INFO_MESSAGE, reply_markup=get_back_to_menu_keyboard(), disable_web_page_preview=True)
         await update.answer()
+        await send_admin_log(update.bot, update.from_user, "Нажал кнопку 'Узнать о Scribo'")
 
 
 @common_router.callback_query(F.data == "generate_work")
@@ -90,3 +96,4 @@ async def handle_generate_work(callback: CallbackQuery, state: FSMContext):
 
     await callback.message.edit_text(text=text)
     await callback.answer()
+    await send_admin_log(callback.bot, callback.from_user, "Нажал кнопку 'Сгенерировать работу'")
