@@ -7,9 +7,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
 from core import settings
-from core.settings import LogLevel
 from handlers import routers_list
-from middlewares.logging_middleware import AdminLoggingMiddleware
 
 async def main() -> None:
     bot = Bot(
@@ -17,11 +15,6 @@ async def main() -> None:
         default=DefaultBotProperties(parse_mode=ParseMode.HTML)
     )
     dp = Dispatcher()
-
-    # Проверяем, нужно ли вообще включать логирование
-    if settings.log_level == LogLevel.ALL:
-        # .outer_middleware() сработает для любого входящего события
-        dp.update.outer_middleware(AdminLoggingMiddleware())
 
     dp.include_routers(*routers_list)
 
