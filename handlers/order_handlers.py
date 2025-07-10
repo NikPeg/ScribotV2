@@ -86,27 +86,40 @@ async def back_to_type(callback: CallbackQuery, state: FSMContext):
 
 
 @order_router.callback_query(StateFilter(OrderStates.GET_MODEL), F.data.startswith("model:"))
-async def handle_model(callback: CallbackQuery, state: FSMContext):
+async def handle_model(callback: CallbackQuery, state: FSMContext, bot: Bot):
     model = callback.data.split(":")[1]
     await state.update_data(model=model)
-
     user_data = await state.get_data()
+    await state.clear()
 
     summary_text = (
-        "✅ Ваш заказ принят!\n\n"
-        f"<b>Тема:</b> {user_data.get('theme')}\n"
-        f"<b>Объем:</b> ~{user_data.get('pages')} страниц\n"
-        f"<b>Тип:</b> {user_data.get('work_type')}\n"
-        f"<b>Модель:</b> {user_data.get('model')}\n"
+        # ... текст со сводкой по заказу
+    )
+    await callback.message.edit_text(text=summary_text)
+
+    # vvv ЭТО СООБЩЕНИЕ МЫ БУДЕМ РЕДАКТИРОВАТЬ vvv
+    progress_message = await callback.message.answer(
+        text="⏳ Инициализация... Готовлюсь к генерации."
     )
 
-    await callback.message.edit_text(text=summary_text, parse_mode="HTML")
-    await callback.answer("Заказ подтвержден")
+    order_id = await create_order(...) # ...
 
-    await callback.message.answer(
-        text="❤Спасибо! Работа начинает генерироваться. Пожалуйста, ожидайте!\n" \
-             "⏳Среднее время создания работы — 10 минут.\n",
-        parse_mode="HTML"
+    thread_id = await create_thread()
+    await update_order_thread_id(order_id, thread_id)
+
+    await ask_assistant(thread_id, f"Тема моей работы: «{user_data.get('theme')}». Запомни её.", model)
+
+    # 4. Запускаем генерацию в фоновой задаче
+    asyncio.create_task(
+        generate_work_async(
+            order_id=order_id,
+            thread_id=thread_id,
+            model_name=model,
+            bot=bot,
+            chat_id=callback.from_user.id,
+            # vvv ПЕРЕДАЕМ ID СООБЩЕНИЯ ДЛЯ РЕДАКТИРОВАНИЯ vvv
+            message_id_to_edit=progress_message.message_id
+        )
     )
 
     await callback.message.answer(
