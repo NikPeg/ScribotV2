@@ -5,6 +5,7 @@ from aiogram.types import Message, CallbackQuery
 from utils.admin_logger import send_admin_log
 import html
 from core import OrderStates
+from aiogram import Bot
 from keyboards import get_pages_keyboard, get_work_type_keyboard, get_model_keyboard, get_back_to_menu_keyboard
 
 order_router = Router()
@@ -93,7 +94,10 @@ async def handle_model(callback: CallbackQuery, state: FSMContext, bot: Bot):
     await state.clear()
 
     summary_text = (
-        # ... текст со сводкой по заказу
+        f"<b>Тема:</b> {user_data.get('theme')}\n"
+        f"<b>Объем:</b> ~{user_data.get('pages')} страниц\n"
+        f"<b>Тип:</b> {user_data.get('work_type')}\n"
+        f"<b>Модель:</b> {user_data.get('model')}\n"
     )
     await callback.message.edit_text(text=summary_text)
 

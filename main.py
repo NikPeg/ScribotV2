@@ -8,8 +8,10 @@ from aiogram.enums import ParseMode
 
 from core import settings
 from handlers import routers_list
+from db.database import init_db
 
 async def main() -> None:
+    await init_db()
     bot = Bot(
         token=settings.bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML)
