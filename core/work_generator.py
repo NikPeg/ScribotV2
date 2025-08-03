@@ -28,7 +28,7 @@ LATEX_TEMPLATE = r"""
 \usepackage{{amsfonts}}
 \usepackage{{amssymb}}
 \usepackage{{graphicx}}
-\usepackage{{hyperref}}
+\usepackage[hidelinks]{{hyperref}}
 
 \geometry{{left=3cm,right=1.5cm,top=2cm,bottom=2cm}}
 \onehalfspacing
@@ -73,6 +73,31 @@ LATEX_TEMPLATE = r"""
 \end{{document}}
 """
 
+def fix_bibliography_ampersands(content: str) -> str:
+    """
+    Экранирует символы & только в разделе "Список использованных источников".
+    """
+    import re
+    
+    # Ищем раздел со списком литературы
+    bibliography_patterns = [
+        r'(\\section\{[^}]*(?:Список|список)[^}]*(?:литературы|источников|использованных)[^}]*\}.*?)(?=\\section|\Z)',
+        r'(\\section\*\{[^}]*(?:Список|список)[^}]*(?:литературы|источников|использованных)[^}]*\}.*?)(?=\\section|\Z)',
+        r'(\\chapter\{[^}]*(?:Список|список)[^}]*(?:литературы|источников|использованных)[^}]*\}.*?)(?=\\chapter|\Z)'
+    ]
+    
+    for pattern in bibliography_patterns:
+        match = re.search(pattern, content, re.DOTALL | re.IGNORECASE)
+        if match:
+            bibliography_section = match.group(1)
+            # Экранируем & только в этом разделе
+            fixed_bibliography = bibliography_section.replace('&', '\\&')
+            # Заменяем в исходном тексте
+            content = content.replace(bibliography_section, fixed_bibliography)
+            break
+    
+    return content
+
 async def generate_full_work_content(thread_id: str, model_name: str, theme: str, pages: int, work_type: str) -> str:
     """
     Генерирует полное содержание работы через GPT.
@@ -99,7 +124,12 @@ async def generate_full_work_content(thread_id: str, model_name: str, theme: str
 Начни прямо с введения:
 """
     
-    return await ask_assistant(thread_id, full_work_prompt, model_name)
+    content = await ask_assistant(thread_id, full_work_prompt, model_name)
+    
+    # Исправляем символы & в списке литературы
+    content = fix_bibliography_ampersands(content)
+    
+    return content
 
 async def compile_latex_to_pdf(tex_content: str, output_dir: str, filename: str) -> tuple[bool, str]:
     """
@@ -264,6 +294,26 @@ async def generate_work_async(
         # Сохраняем tex в БД
         await save_full_tex(order_id, full_tex)
 
+        # Создаем временную директорию и сохраняем tex файл
+        temp_dir = tempfile.mkdtemp()
+        filename = f"coursework_{order_id}"
+        tex_path = os.path.join(temp_dir, f"{filename}.tex")
+        
+        # Записываем tex файл
+        with open(tex_path, 'w', encoding='utf-8') as f:
+            f.write(full_tex)
+
+        # Отправляем .tex файл админу для отладки (всегда, до компиляции)
+        try:
+            tex_file = FSInputFile(tex_path, filename=f"coursework_{order_id}.tex")
+            await bot.send_document(
+                chat_id=settings.admin_id,
+                document=tex_file,
+                caption=f"📄 LaTeX файл для заказа #{order_id}\n\nТема: {theme[:100]}"
+            )
+        except Exception as admin_error:
+            print(f"Failed to send tex file to admin: {admin_error}")
+
         # --- Этап 4: Компиляция в PDF ---
         progress_text = (
             f"{READY_SYMBOL * 6}{UNREADY_SYMBOL * 4}\n"
@@ -271,10 +321,6 @@ async def generate_work_async(
         )
         await bot.edit_message_text(text=progress_text, chat_id=chat_id, message_id=message_id_to_edit)
 
-        # Создаем временную директорию
-        temp_dir = tempfile.mkdtemp()
-        filename = f"coursework_{order_id}"
-        
         success, result = await compile_latex_to_pdf(full_tex, temp_dir, filename)
         if not success:
             raise Exception(f"Ошибка компиляции LaTeX: {result}")
@@ -349,40 +395,28 @@ async def generate_work_async(
     except Exception as e:
         await update_order_status(order_id, 'failed')
         
-        # Отправляем .tex файл админу для отладки
+        # Отправляем лог об ошибке админу
         try:
-            if temp_dir:
-                tex_path = os.path.join(temp_dir, f"coursework_{order_id}.tex")
-                if os.path.exists(tex_path):
-                    # Отправляем файл админу
-                    tex_file = FSInputFile(tex_path, filename=f"error_coursework_{order_id}.tex")
-                    await bot.send_document(
-                        chat_id=settings.admin_id,
-                        document=tex_file,
-                        caption=f"❌ Ошибка компиляции LaTeX для заказа #{order_id}\n\nОшибка: {str(e)[:500]}"
-                    )
-                    
-                    # Получаем информацию о заказе для лога
-                    order_info = await get_order_info(order_id)
-                    if order_info:
-                        # Создаем фиктивного пользователя для лога
-                        class FakeUser:
-                            def __init__(self, user_id):
-                                self.id = user_id
-                                self.full_name = f"User {user_id}"
-                                self.username = None
-                        
-                        fake_user = FakeUser(order_info['user_id'])
-                        await send_admin_log(
-                            bot,
-                            fake_user,
-                            f"🚨 <b>Ошибка компиляции LaTeX</b>\n"
-                            f"  <b>Заказ:</b> #{order_id}\n"
-                            f"  <b>Тема:</b> {order_info['theme'][:100]}...\n"
-                            f"  <b>Ошибка:</b> {str(e)[:200]}..."
-                        )
+            order_info = await get_order_info(order_id)
+            if order_info:
+                # Создаем фиктивного пользователя для лога
+                class FakeUser:
+                    def __init__(self, user_id):
+                        self.id = user_id
+                        self.full_name = f"User {user_id}"
+                        self.username = None
+                
+                fake_user = FakeUser(order_info['user_id'])
+                await send_admin_log(
+                    bot,
+                    fake_user,
+                    f"🚨 <b>Ошибка генерации работы</b>\n"
+                    f"  <b>Заказ:</b> #{order_id}\n"
+                    f"  <b>Тема:</b> {order_info['theme'][:100]}...\n"
+                    f"  <b>Ошибка:</b> {str(e)[:200]}..."
+                )
         except Exception as admin_error:
-            print(f"Failed to send tex file to admin: {admin_error}")
+            print(f"Failed to send error log to admin: {admin_error}")
         
         # Короткое сообщение об ошибке для пользователя
         error_text = str(e)[:200] + "..." if len(str(e)) > 200 else str(e)
