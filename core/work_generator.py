@@ -8,6 +8,8 @@ from aiogram.types import FSInputFile
 
 from db.database import update_order_status, save_full_tex, get_order_info
 from gpt.assistant import ask_assistant
+from utils.admin_logger import send_admin_log
+from core.settings import settings
 
 # Для "прогресс-бара"
 READY_SYMBOL = "🟦"
@@ -59,7 +61,7 @@ LATEX_TEMPLATE = r"""
 \end{{flushright}}
 
 \vfill
-{{\large Москва 2024}}
+{{\large Москва 2025}}
 \end{{titlepage}}
 
 \newpage
@@ -102,6 +104,7 @@ async def generate_full_work_content(thread_id: str, model_name: str, theme: str
 async def compile_latex_to_pdf(tex_content: str, output_dir: str, filename: str) -> tuple[bool, str]:
     """
     Асинхронно компилирует LaTeX в PDF.
+    Запускает pdflatex дважды для корректной генерации содержания и ссылок.
     Возвращает (успех, путь_к_файлу_или_ошибка).
     """
     tex_file = os.path.join(output_dir, f"{filename}.tex")
@@ -112,8 +115,8 @@ async def compile_latex_to_pdf(tex_content: str, output_dir: str, filename: str)
         with open(tex_file, 'w', encoding='utf-8') as f:
             f.write(tex_content)
         
-        # Асинхронно запускаем pdflatex
-        process = await asyncio.create_subprocess_exec(
+        # Первый проход pdflatex (генерирует .aux файлы)
+        process1 = await asyncio.create_subprocess_exec(
             'pdflatex',
             '-interaction=nonstopmode',
             '-output-directory', output_dir,
@@ -123,14 +126,29 @@ async def compile_latex_to_pdf(tex_content: str, output_dir: str, filename: str)
             cwd=output_dir
         )
         
-        stdout, stderr = await process.communicate()
+        stdout1, stderr1 = await process1.communicate()
         
-        if process.returncode == 0 and os.path.exists(pdf_file):
+        # Второй проход pdflatex (использует .aux для содержания и ссылок)
+        process2 = await asyncio.create_subprocess_exec(
+            'pdflatex',
+            '-interaction=nonstopmode',
+            '-output-directory', output_dir,
+            tex_file,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=output_dir
+        )
+        
+        stdout2, stderr2 = await process2.communicate()
+        
+        # Проверяем результат второго прохода
+        if process2.returncode == 0 and os.path.exists(pdf_file):
             return True, pdf_file
         else:
-            error_msg = f"LaTeX compilation failed. Return code: {process.returncode}\n"
-            error_msg += f"STDOUT: {stdout.decode('utf-8', errors='ignore')}\n"
-            error_msg += f"STDERR: {stderr.decode('utf-8', errors='ignore')}"
+            error_msg = f"LaTeX compilation failed on second pass. Return code: {process2.returncode}\n"
+            error_msg += f"First pass stdout: {stdout1.decode('utf-8', errors='ignore')[:500]}...\n"
+            error_msg += f"Second pass stdout: {stdout2.decode('utf-8', errors='ignore')[:500]}...\n"
+            error_msg += f"Second pass stderr: {stderr2.decode('utf-8', errors='ignore')[:500]}..."
             return False, error_msg
             
     except Exception as e:
@@ -330,6 +348,42 @@ async def generate_work_async(
 
     except Exception as e:
         await update_order_status(order_id, 'failed')
+        
+        # Отправляем .tex файл админу для отладки
+        try:
+            if temp_dir:
+                tex_path = os.path.join(temp_dir, f"coursework_{order_id}.tex")
+                if os.path.exists(tex_path):
+                    # Отправляем файл админу
+                    tex_file = FSInputFile(tex_path, filename=f"error_coursework_{order_id}.tex")
+                    await bot.send_document(
+                        chat_id=settings.admin_id,
+                        document=tex_file,
+                        caption=f"❌ Ошибка компиляции LaTeX для заказа #{order_id}\n\nОшибка: {str(e)[:500]}"
+                    )
+                    
+                    # Получаем информацию о заказе для лога
+                    order_info = await get_order_info(order_id)
+                    if order_info:
+                        # Создаем фиктивного пользователя для лога
+                        class FakeUser:
+                            def __init__(self, user_id):
+                                self.id = user_id
+                                self.full_name = f"User {user_id}"
+                                self.username = None
+                        
+                        fake_user = FakeUser(order_info['user_id'])
+                        await send_admin_log(
+                            bot,
+                            fake_user,
+                            f"🚨 <b>Ошибка компиляции LaTeX</b>\n"
+                            f"  <b>Заказ:</b> #{order_id}\n"
+                            f"  <b>Тема:</b> {order_info['theme'][:100]}...\n"
+                            f"  <b>Ошибка:</b> {str(e)[:200]}..."
+                        )
+        except Exception as admin_error:
+            print(f"Failed to send tex file to admin: {admin_error}")
+        
         # Короткое сообщение об ошибке для пользователя
         error_text = str(e)[:200] + "..." if len(str(e)) > 200 else str(e)
         error_text = error_text.replace('<', '&lt;').replace('>', '&gt;')
