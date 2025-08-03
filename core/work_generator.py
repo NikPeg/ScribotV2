@@ -64,7 +64,6 @@ LATEX_TEMPLATE = r"""
 {{\large Москва 2025}}
 \end{{titlepage}}
 
-\newpage
 \tableofcontents
 \newpage
 
@@ -184,14 +183,46 @@ async def compile_latex_to_pdf(tex_content: str, output_dir: str, filename: str)
     except Exception as e:
         return False, f"Exception during LaTeX compilation: {str(e)}"
 
-async def convert_pdf_to_docx(pdf_path: str, output_dir: str, filename: str) -> tuple[bool, str]:
+async def convert_tex_to_docx(tex_content: str, output_dir: str, filename: str) -> tuple[bool, str]:
     """
-    Конвертирует PDF в DOCX используя libreoffice.
+    Конвертирует TEX напрямую в DOCX используя pandoc или LibreOffice.
     Возвращает (успех, путь_к_файлу_или_ошибка).
     """
     docx_file = os.path.join(output_dir, f"{filename}.docx")
     
-    # Возможные пути к LibreOffice на разных системах
+    # Сначала пробуем pandoc (более надежно для LaTeX -> DOCX)
+    try:
+        # Создаем временный tex файл
+        tex_file = os.path.join(output_dir, f"{filename}_temp.tex")
+        with open(tex_file, 'w', encoding='utf-8') as f:
+            f.write(tex_content)
+        
+        # Пробуем pandoc
+        pandoc_process = await asyncio.create_subprocess_exec(
+            'pandoc',
+            tex_file,
+            '-o', docx_file,
+            '--from=latex',
+            '--to=docx',
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        
+        stdout, stderr = await pandoc_process.communicate()
+        
+        if pandoc_process.returncode == 0 and os.path.exists(docx_file):
+            # Удаляем временный файл
+            try:
+                os.remove(tex_file)
+            except:
+                pass
+            return True, docx_file
+            
+    except Exception as e:
+        # pandoc не найден или не работает, пробуем LibreOffice
+        pass
+    
+    # Если pandoc не сработал, пробуем LibreOffice через ODT
     libreoffice_commands = [
         'libreoffice',  # Linux/Windows в PATH
         '/Applications/LibreOffice.app/Contents/MacOS/soffice',  # macOS стандартная установка
@@ -210,32 +241,57 @@ async def convert_pdf_to_docx(pdf_path: str, output_dir: str, filename: str) -> 
             await check_process.communicate()
             
             if check_process.returncode == 0:
-                # Команда найдена, используем её для конвертации
+                # Создаем простой ODT файл из текста (без LaTeX команд)
+                # Извлекаем только текстовое содержимое
+                import re
+                
+                # Убираем LaTeX команды и оставляем только текст
+                clean_text = re.sub(r'\\[a-zA-Z]+\{[^}]*\}', '', tex_content)
+                clean_text = re.sub(r'\\[a-zA-Z]+', '', clean_text)
+                clean_text = re.sub(r'\{[^}]*\}', '', clean_text)
+                clean_text = re.sub(r'\\\\', '\n', clean_text)
+                clean_text = re.sub(r'\n\s*\n', '\n\n', clean_text)
+                
+                # Создаем простой текстовый файл
+                txt_file = os.path.join(output_dir, f"{filename}_temp.txt")
+                with open(txt_file, 'w', encoding='utf-8') as f:
+                    f.write(clean_text)
+                
+                # Конвертируем TXT в DOCX
                 process = await asyncio.create_subprocess_exec(
                     cmd,
                     '--headless',
                     '--convert-to', 'docx',
                     '--outdir', output_dir,
-                    pdf_path,
+                    txt_file,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE
                 )
                 
                 stdout, stderr = await process.communicate()
                 
-                if process.returncode == 0 and os.path.exists(docx_file):
-                    return True, docx_file
-                else:
-                    error_msg = f"PDF to DOCX conversion failed with {cmd}. Return code: {process.returncode}\n"
-                    error_msg += f"STDOUT: {stdout.decode('utf-8', errors='ignore')}\n"
-                    error_msg += f"STDERR: {stderr.decode('utf-8', errors='ignore')}"
-                    return False, error_msg
+                # Переименовываем результат
+                txt_docx = os.path.join(output_dir, f"{filename}_temp.docx")
+                if process.returncode == 0 and os.path.exists(txt_docx):
+                    try:
+                        os.rename(txt_docx, docx_file)
+                        os.remove(txt_file)
+                        return True, docx_file
+                    except:
+                        pass
+                
+                # Очищаем временные файлы
+                try:
+                    os.remove(txt_file)
+                    if os.path.exists(txt_docx):
+                        os.remove(txt_docx)
+                except:
+                    pass
                     
         except Exception as e:
-            # Пробуем следующую команду
             continue
     
-    return False, "LibreOffice not found. Tried commands: " + ", ".join(libreoffice_commands)
+    return False, "Neither pandoc nor LibreOffice could convert to DOCX"
 
 async def generate_work_async(
         order_id: int,
@@ -334,7 +390,7 @@ async def generate_work_async(
         )
         await bot.edit_message_text(text=progress_text, chat_id=chat_id, message_id=message_id_to_edit)
 
-        success, result = await convert_pdf_to_docx(pdf_path, temp_dir, filename)
+        success, result = await convert_tex_to_docx(full_tex, temp_dir, filename)
         if not success:
             # Если конвертация не удалась, продолжаем без DOCX
             print(f"Предупреждение: не удалось создать DOCX файл: {result}")
