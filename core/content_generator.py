@@ -78,18 +78,29 @@ async def generate_work_content_stepwise(
         # Fallback к старому методу если план не распарсился
         return await generate_full_work_content_legacy(thread_id, model_name, theme, pages, work_type)
     
-    # Рассчитываем страницы для каждой главы
-    pages_per_chapter = calculate_pages_per_chapter(pages, chapters)
+    # Разделяем главы на основные и список источников
+    main_chapters = []
+    bibliography_chapter = None
+    
+    for chapter in chapters:
+        if _is_bibliography_chapter(chapter['title']):
+            bibliography_chapter = chapter
+        else:
+            main_chapters.append(chapter)
+    
+    # Рассчитываем страницы для основных глав (исключая список источников)
+    pages_per_chapter = calculate_pages_per_chapter(pages - 0.5, main_chapters)  # Резервируем 0.5 стр для списка
     
     full_content = ""
     total_pages_generated = 0.0
     
-    for i, chapter in enumerate(chapters):
+    # Генерируем основные главы
+    for i, chapter in enumerate(main_chapters):
         chapter_title = chapter['title']
         target_pages = pages_per_chapter.get(chapter_title, 2.0)
         
         if progress_callback:
-            progress = int((i / len(chapters)) * 100)
+            progress = int((i / len(main_chapters)) * 90)  # 90% для основных глав
             await progress_callback(f"Генерирую главу: {chapter_title[:50]}...", progress)
         
         # Генерируем основное содержание главы
@@ -98,11 +109,12 @@ async def generate_work_content_stepwise(
         )
         
         current_chapter_pages = count_pages_in_text(chapter_content)
+        subsections_content = ""
         
         # Если страниц недостаточно, генерируем подразделы
         if should_generate_subsections(current_chapter_pages, target_pages):
             subsections_content = await generate_subsections_content(
-                thread_id, model_name, chapter_title, chapter['subsections'], 
+                thread_id, model_name, chapter_title, chapter['subsections'],
                 target_pages - current_chapter_pages, theme
             )
             chapter_content += "\n\n" + subsections_content
@@ -113,8 +125,27 @@ async def generate_work_content_stepwise(
         total_pages_generated += current_chapter_pages
         
         # Проверяем, не превысили ли общий объем
-        if total_pages_generated >= pages * 1.1:  # 10% допуск
+        if total_pages_generated >= pages * 1.1:
             break
+    
+    # Всегда добавляем список источников в конце
+    if bibliography_chapter:
+        if progress_callback:
+            await progress_callback("Генерирую список источников...", 95)
+        
+        bibliography_content = await generate_chapter_content(
+            thread_id, model_name, bibliography_chapter['title'], theme, 0.5, work_type
+        )
+        full_content += bibliography_content
+    else:
+        # Если список источников не был в плане, создаем его
+        if progress_callback:
+            await progress_callback("Генерирую список источников...", 95)
+        
+        bibliography_content = await generate_chapter_content(
+            thread_id, model_name, "Список использованных источников", theme, 0.5, work_type
+        )
+        full_content += bibliography_content
     
     return full_content.strip()
 
@@ -326,6 +357,9 @@ def fix_section_commands(content: str, expected_subsection_title: str) -> str:
     """
     import re
     
+    # Убираем лишние \newpage в начале подраздела
+    content = re.sub(r'^\\newpage\s*', '', content.strip())
+    
     # Ищем команды \section в начале содержания
     section_pattern = r'^\\section\{([^}]+)\}'
     match = re.search(section_pattern, content.strip(), re.MULTILINE)
@@ -342,3 +376,17 @@ def fix_section_commands(content: str, expected_subsection_title: str) -> str:
         print(f"Added missing \\subsection{{{expected_subsection_title}}}")
     
     return content
+
+
+def _is_bibliography_chapter(chapter_title: str) -> bool:
+    """
+    Проверяет, является ли глава списком литературы.
+    
+    Args:
+        chapter_title: Название главы
+    
+    Returns:
+        True, если это список литературы
+    """
+    title_lower = chapter_title.lower()
+    return any(keyword in title_lower for keyword in ['список', 'библиография', 'источник', 'литература'])
