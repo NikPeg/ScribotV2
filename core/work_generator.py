@@ -15,50 +15,52 @@ UNREADY_SYMBOL = "⬜️"
 
 # Шаблон LaTeX документа
 LATEX_TEMPLATE = r"""
-\documentclass[12pt,a4paper]{article}
-\usepackage[utf8]{inputenc}
-\usepackage[russian]{babel}
-\usepackage{geometry}
-\usepackage{setspace}
-\usepackage{indentfirst}
-\usepackage{amsmath}
-\usepackage{amsfonts}
-\usepackage{amssymb}
-\usepackage{graphicx}
-\usepackage{hyperref}
+\documentclass[12pt,a4paper]{{article}}
+\usepackage[utf8]{{inputenc}}
+\usepackage[T2A]{{fontenc}}
+\usepackage[russian]{{babel}}
+\usepackage{{geometry}}
+\usepackage{{setspace}}
+\usepackage{{indentfirst}}
+\usepackage{{amsmath}}
+\usepackage{{amsfonts}}
+\usepackage{{amssymb}}
+\usepackage{{graphicx}}
+\usepackage{{hyperref}}
 
-\geometry{left=3cm,right=1.5cm,top=2cm,bottom=2cm}
+\geometry{{left=3cm,right=1.5cm,top=2cm,bottom=2cm}}
 \onehalfspacing
-\setlength{\parindent}{1.25cm}
+\setlength{{\parindent}}{{1.25cm}}
 
-\begin{document}
+\begin{{document}}
 
-\begin{titlepage}
+\begin{{titlepage}}
 \centering
-\vspace*{2cm}
-{\Large\textbf{МИНИСТЕРСТВО ОБРАЗОВАНИЯ И НАУКИ РОССИЙСКОЙ ФЕДЕРАЦИИ}}\\[0.5cm]
-{\large Федеральное государственное бюджетное образовательное учреждение\\
-высшего образования}\\[0.5cm]
-{\Large\textbf{«РОССИЙСКИЙ ГОСУДАРСТВЕННЫЙ УНИВЕРСИТЕТ»}}\\[2cm]
+\vspace*{{2cm}}
+{{\Large\textbf{{МИНИСТЕРСТВО ОБРАЗОВАНИЯ И НАУКИ РФ}}}}\\[0.5cm]
+{{\large Федеральное государственное бюджетное\\
+образовательное учреждение высшего образования}}\\[0.5cm]
+{{\Large\textbf{{РОССИЙСКИЙ ГОСУДАРСТВЕННЫЙ УНИВЕРСИТЕТ}}}}\\[2cm]
 
-{\large Факультет информационных технологий}\\[0.5cm]
-{\large Кафедра программной инженерии}\\[3cm]
+{{\large Факультет информационных технологий}}\\[0.5cm]
+{{\large Кафедра программной инженерии}}\\[3cm]
 
-{\Large\textbf{КУРСОВАЯ РАБОТА}}\\[0.5cm]
-{\large по дисциплине «Информационные технологии»}\\[1cm]
+{{\Large\textbf{{КУРСОВАЯ РАБОТА}}}}\\[0.5cm]
+{{\large по дисциплине}}\\[0.3cm]
+{{\large Информационные технологии}}\\[1cm]
 
-{\Large\textbf{на тему: «{theme}»}}\\[3cm]
+{{\Large\textbf{{Тема: {theme}}}}}\\[3cm]
 
-\begin{flushright}
+\begin{{flushright}}
 Выполнил: студент группы ИТ-21\\
 Иванов И.И.\\[1cm]
 Проверил: к.т.н., доцент\\
 Петров П.П.
-\end{flushright}
+\end{{flushright}}
 
 \vfill
-{\large Москва 2024}
-\end{titlepage}
+{{\large Москва 2024}}
+\end{{titlepage}}
 
 \newpage
 \tableofcontents
@@ -66,7 +68,7 @@ LATEX_TEMPLATE = r"""
 
 {content}
 
-\end{document}
+\end{{document}}
 """
 
 async def generate_full_work_content(thread_id: str, model_name: str, theme: str, pages: int, work_type: str) -> str:
@@ -83,9 +85,11 @@ async def generate_full_work_content(thread_id: str, model_name: str, theme: str
 3. Заключение (1-2 страницы)
 4. Список литературы
 
-Требования:
+ВАЖНЫЕ требования к форматированию:
 - Текст должен быть в формате LaTeX (без преамбулы и \\begin{{document}})
 - Используй команды \\section{{}} для глав, \\subsection{{}} для подразделов
+- НЕ используй длинные строки текста - разбивай абзацы на короткие строки (максимум 80 символов)
+- После каждого предложения делай перенос строки
 - Включи формулы, таблицы или рисунки где уместно
 - Текст должен быть академическим и структурированным
 - Добавь реальные источники в список литературы
@@ -139,30 +143,51 @@ async def convert_pdf_to_docx(pdf_path: str, output_dir: str, filename: str) -> 
     """
     docx_file = os.path.join(output_dir, f"{filename}.docx")
     
-    try:
-        # Асинхронно запускаем libreoffice для конвертации
-        process = await asyncio.create_subprocess_exec(
-            'libreoffice',
-            '--headless',
-            '--convert-to', 'docx',
-            '--outdir', output_dir,
-            pdf_path,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        
-        stdout, stderr = await process.communicate()
-        
-        if process.returncode == 0 and os.path.exists(docx_file):
-            return True, docx_file
-        else:
-            error_msg = f"PDF to DOCX conversion failed. Return code: {process.returncode}\n"
-            error_msg += f"STDOUT: {stdout.decode('utf-8', errors='ignore')}\n"
-            error_msg += f"STDERR: {stderr.decode('utf-8', errors='ignore')}"
-            return False, error_msg
+    # Возможные пути к LibreOffice на разных системах
+    libreoffice_commands = [
+        'libreoffice',  # Linux/Windows в PATH
+        '/Applications/LibreOffice.app/Contents/MacOS/soffice',  # macOS стандартная установка
+        '/usr/bin/libreoffice',  # Linux системная установка
+        'soffice'  # Альтернативное имя
+    ]
+    
+    for cmd in libreoffice_commands:
+        try:
+            # Проверяем доступность команды
+            check_process = await asyncio.create_subprocess_exec(
+                cmd, '--version',
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            await check_process.communicate()
             
-    except Exception as e:
-        return False, f"Exception during PDF to DOCX conversion: {str(e)}"
+            if check_process.returncode == 0:
+                # Команда найдена, используем её для конвертации
+                process = await asyncio.create_subprocess_exec(
+                    cmd,
+                    '--headless',
+                    '--convert-to', 'docx',
+                    '--outdir', output_dir,
+                    pdf_path,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+                
+                stdout, stderr = await process.communicate()
+                
+                if process.returncode == 0 and os.path.exists(docx_file):
+                    return True, docx_file
+                else:
+                    error_msg = f"PDF to DOCX conversion failed with {cmd}. Return code: {process.returncode}\n"
+                    error_msg += f"STDOUT: {stdout.decode('utf-8', errors='ignore')}\n"
+                    error_msg += f"STDERR: {stderr.decode('utf-8', errors='ignore')}"
+                    return False, error_msg
+                    
+        except Exception as e:
+            # Пробуем следующую команду
+            continue
+    
+    return False, "LibreOffice not found. Tried commands: " + ", ".join(libreoffice_commands)
 
 async def generate_work_async(
         order_id: int,
@@ -261,40 +286,30 @@ async def generate_work_async(
         await bot.edit_message_text(text=progress_text, chat_id=chat_id, message_id=message_id_to_edit)
 
         # Отправляем файлы пользователю
-        success_message = "🎉 Поздравляю! Ваша работа успешно сгенерирована!\n\n"
+        files_sent = 0
         
         # Отправляем PDF
         if os.path.exists(pdf_path):
-            pdf_file = FSInputFile(pdf_path, filename=f"{theme[:30]}.pdf")
+            # Безопасное имя файла
+            safe_filename = "".join(c for c in theme if c.isalnum() or c in (' ', '-', '_')).rstrip()[:30]
+            pdf_file = FSInputFile(pdf_path, filename=f"{safe_filename}.pdf")
             await bot.send_document(
                 chat_id=chat_id,
                 document=pdf_file,
-                caption=f"📄 PDF версия вашей работы\n\n<b>Тема:</b> {theme}"
+                caption="📄 PDF версия вашей работы"
             )
-            success_message += "✅ PDF файл отправлен\n"
+            files_sent += 1
         
         # Отправляем DOCX если удалось создать
         if docx_path and os.path.exists(docx_path):
-            docx_file = FSInputFile(docx_path, filename=f"{theme[:30]}.docx")
+            safe_filename = "".join(c for c in theme if c.isalnum() or c in (' ', '-', '_')).rstrip()[:30]
+            docx_file = FSInputFile(docx_path, filename=f"{safe_filename}.docx")
             await bot.send_document(
                 chat_id=chat_id,
                 document=docx_file,
                 caption="📝 DOCX версия для редактирования"
             )
-            success_message += "✅ DOCX файл отправлен\n"
-        else:
-            success_message += "⚠️ DOCX файл не создан (возможны проблемы с LibreOffice)\n"
-
-        # Отправляем TEX файл
-        tex_path = os.path.join(temp_dir, f"{filename}.tex")
-        if os.path.exists(tex_path):
-            tex_file = FSInputFile(tex_path, filename=f"{theme[:30]}.tex")
-            await bot.send_document(
-                chat_id=chat_id,
-                document=tex_file,
-                caption="📋 LaTeX исходный код"
-            )
-            success_message += "✅ TEX файл отправлен"
+            files_sent += 1
 
         # Финальное сообщение
         await bot.edit_message_text(
@@ -303,14 +318,24 @@ async def generate_work_async(
             message_id=message_id_to_edit
         )
         
-        await bot.send_message(chat_id=chat_id, text=success_message)
+        # Отправляем итоговое сообщение
+        final_message = f"🎉 Поздравляю! Ваша работа успешно сгенерирована!\n\n📁 Отправлено файлов: {files_sent}"
+        if docx_path is None:
+            final_message += "\n\n⚠️ DOCX файл не создан (требуется LibreOffice)"
+        
+        await bot.send_message(chat_id=chat_id, text=final_message)
 
         # --- Обновляем статус в БД ---
         await update_order_status(order_id, 'completed')
 
     except Exception as e:
         await update_order_status(order_id, 'failed')
-        error_message = f"❌ Произошла ошибка во время генерации:\n\n<code>{str(e)}</code>"
+        # Короткое сообщение об ошибке для пользователя
+        error_text = str(e)[:200] + "..." if len(str(e)) > 200 else str(e)
+        error_text = error_text.replace('<', '&lt;').replace('>', '&gt;')
+        error_message = f"❌ Произошла ошибка во время генерации:\n\n{error_text}"
+        
+        # Полная ошибка в логи
         print(f"Error in generate_work_async: {e}")
         
         try:
@@ -322,6 +347,11 @@ async def generate_work_async(
             await bot.send_message(chat_id, error_message)
         except Exception as send_error:
             print(f"Failed to send error message: {send_error}")
+            # Если и короткое сообщение не отправляется, отправляем минимальное
+            try:
+                await bot.send_message(chat_id, "❌ Произошла ошибка во время генерации. Попробуйте еще раз.")
+            except:
+                pass
     
     finally:
         # Очищаем временные файлы

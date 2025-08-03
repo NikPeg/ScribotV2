@@ -32,6 +32,9 @@ sudo apt-get install libreoffice
 brew install --cask libreoffice
 ```
 
+После установки LibreOffice будет доступен по пути:
+`/Applications/LibreOffice.app/Contents/MacOS/soffice`
+
 **Windows:**
 Скачайте и установите LibreOffice с официального сайта: https://www.libreoffice.org/
 
@@ -44,7 +47,11 @@ brew install --cask libreoffice
 pdflatex --version
 
 # Проверка LibreOffice
+# На Linux/Windows:
 libreoffice --version
+
+# На macOS:
+/Applications/LibreOffice.app/Contents/MacOS/soffice --version
 ```
 
 ## Альтернативные решения
