@@ -7,7 +7,7 @@ from typing import List, Dict, Tuple
 
 
 # Константы для расчета страниц
-SYMBOLS_IN_PAGE = 1500
+SYMBOLS_IN_PAGE = 1400
 
 
 def count_pages_in_text(text: str) -> float:
