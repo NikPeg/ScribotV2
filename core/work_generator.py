@@ -1,297 +1,23 @@
+"""
+Основной модуль для асинхронной генерации курсовых работ.
+"""
+
 import asyncio
 import os
 import tempfile
-import subprocess
-from pathlib import Path
+import shutil
 from aiogram import Bot
-from aiogram.types import FSInputFile
 
 from db.database import update_order_status, save_full_tex, get_order_info
-from gpt.assistant import ask_assistant
-from utils.admin_logger import send_admin_log
-from core.settings import settings
+from core.content_generator import generate_work_plan, generate_full_work_content
+from core.latex_template import create_latex_document
+from core.document_converter import compile_latex_to_pdf, convert_tex_to_docx
+from core.file_sender import send_tex_file_to_admin, send_generated_files_to_user, send_error_log_to_admin
 
 # Для "прогресс-бара"
 READY_SYMBOL = "🟦"
 UNREADY_SYMBOL = "⬜️"
 
-# Шаблон LaTeX документа
-LATEX_TEMPLATE = r"""
-\documentclass[12pt,a4paper]{{article}}
-\usepackage[utf8]{{inputenc}}
-\usepackage[T2A]{{fontenc}}
-\usepackage[russian]{{babel}}
-\usepackage{{geometry}}
-\usepackage{{setspace}}
-\usepackage{{indentfirst}}
-\usepackage{{amsmath}}
-\usepackage{{amsfonts}}
-\usepackage{{amssymb}}
-\usepackage{{graphicx}}
-\usepackage[hidelinks]{{hyperref}}
-
-\geometry{{left=3cm,right=1.5cm,top=2cm,bottom=2cm}}
-\onehalfspacing
-\setlength{{\parindent}}{{1.25cm}}
-
-\begin{{document}}
-
-\begin{{titlepage}}
-\centering
-\vspace*{{2cm}}
-{{\Large\textbf{{МИНИСТЕРСТВО ОБРАЗОВАНИЯ И НАУКИ РФ}}}}\\[0.5cm]
-{{\large Федеральное государственное бюджетное\\
-образовательное учреждение высшего образования}}\\[0.5cm]
-{{\Large\textbf{{РОССИЙСКИЙ ГОСУДАРСТВЕННЫЙ УНИВЕРСИТЕТ}}}}\\[2cm]
-
-{{\large Факультет информационных технологий}}\\[0.5cm]
-{{\large Кафедра программной инженерии}}\\[3cm]
-
-{{\Large\textbf{{КУРСОВАЯ РАБОТА}}}}\\[0.5cm]
-{{\large по дисциплине}}\\[0.3cm]
-{{\large Информационные технологии}}\\[1cm]
-
-{{\Large\textbf{{Тема: {theme}}}}}\\[3cm]
-
-\begin{{flushright}}
-Выполнил: студент группы ИТ-21\\
-Иванов И.И.\\[1cm]
-Проверил: к.т.н., доцент\\
-Петров П.П.
-\end{{flushright}}
-
-\vfill
-{{\large Москва 2025}}
-\end{{titlepage}}
-
-\tableofcontents
-\newpage
-
-{content}
-
-\end{{document}}
-"""
-
-def fix_bibliography_ampersands(content: str) -> str:
-    """
-    Экранирует символы & только в разделе "Список использованных источников".
-    """
-    import re
-    
-    # Ищем раздел со списком литературы
-    bibliography_patterns = [
-        r'(\\section\{[^}]*(?:Список|список)[^}]*(?:литературы|источников|использованных)[^}]*\}.*?)(?=\\section|\Z)',
-        r'(\\section\*\{[^}]*(?:Список|список)[^}]*(?:литературы|источников|использованных)[^}]*\}.*?)(?=\\section|\Z)',
-        r'(\\chapter\{[^}]*(?:Список|список)[^}]*(?:литературы|источников|использованных)[^}]*\}.*?)(?=\\chapter|\Z)'
-    ]
-    
-    for pattern in bibliography_patterns:
-        match = re.search(pattern, content, re.DOTALL | re.IGNORECASE)
-        if match:
-            bibliography_section = match.group(1)
-            # Экранируем & только в этом разделе
-            fixed_bibliography = bibliography_section.replace('&', '\\&')
-            # Заменяем в исходном тексте
-            content = content.replace(bibliography_section, fixed_bibliography)
-            break
-    
-    return content
-
-async def generate_full_work_content(thread_id: str, model_name: str, theme: str, pages: int, work_type: str) -> str:
-    """
-    Генерирует полное содержание работы через GPT.
-    """
-    # Промпт для генерации полной работы
-    full_work_prompt = f"""
-Напиши полную {work_type.lower()} на тему "{theme}" объемом примерно {pages} страниц.
-
-Структура должна включать:
-1. Введение (1-2 страницы)
-2. Основная часть (3-4 главы, каждая 2-3 страницы)
-3. Заключение (1-2 страницы)
-4. Список литературы
-
-ВАЖНЫЕ требования к форматированию:
-- Текст должен быть в формате LaTeX (без преамбулы и \\begin{{document}})
-- Используй команды \\section{{}} для глав, \\subsection{{}} для подразделов
-- НЕ используй длинные строки текста - разбивай абзацы на короткие строки (максимум 80 символов)
-- После каждого предложения делай перенос строки
-- Включи формулы, таблицы или рисунки где уместно
-- Текст должен быть академическим и структурированным
-- Добавь реальные источники в список литературы
-
-Начни прямо с введения:
-"""
-    
-    content = await ask_assistant(thread_id, full_work_prompt, model_name)
-    
-    # Исправляем символы & в списке литературы
-    content = fix_bibliography_ampersands(content)
-    
-    return content
-
-async def compile_latex_to_pdf(tex_content: str, output_dir: str, filename: str) -> tuple[bool, str]:
-    """
-    Асинхронно компилирует LaTeX в PDF.
-    Запускает pdflatex дважды для корректной генерации содержания и ссылок.
-    Возвращает (успех, путь_к_файлу_или_ошибка).
-    """
-    tex_file = os.path.join(output_dir, f"{filename}.tex")
-    pdf_file = os.path.join(output_dir, f"{filename}.pdf")
-    
-    try:
-        # Записываем tex файл
-        with open(tex_file, 'w', encoding='utf-8') as f:
-            f.write(tex_content)
-        
-        # Первый проход pdflatex (генерирует .aux файлы)
-        process1 = await asyncio.create_subprocess_exec(
-            'pdflatex',
-            '-interaction=nonstopmode',
-            '-output-directory', output_dir,
-            tex_file,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=output_dir
-        )
-        
-        stdout1, stderr1 = await process1.communicate()
-        
-        # Второй проход pdflatex (использует .aux для содержания и ссылок)
-        process2 = await asyncio.create_subprocess_exec(
-            'pdflatex',
-            '-interaction=nonstopmode',
-            '-output-directory', output_dir,
-            tex_file,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=output_dir
-        )
-        
-        stdout2, stderr2 = await process2.communicate()
-        
-        # Проверяем результат второго прохода
-        if process2.returncode == 0 and os.path.exists(pdf_file):
-            return True, pdf_file
-        else:
-            error_msg = f"LaTeX compilation failed on second pass. Return code: {process2.returncode}\n"
-            error_msg += f"First pass stdout: {stdout1.decode('utf-8', errors='ignore')[:500]}...\n"
-            error_msg += f"Second pass stdout: {stdout2.decode('utf-8', errors='ignore')[:500]}...\n"
-            error_msg += f"Second pass stderr: {stderr2.decode('utf-8', errors='ignore')[:500]}..."
-            return False, error_msg
-            
-    except Exception as e:
-        return False, f"Exception during LaTeX compilation: {str(e)}"
-
-async def convert_tex_to_docx(tex_content: str, output_dir: str, filename: str) -> tuple[bool, str]:
-    """
-    Конвертирует TEX напрямую в DOCX используя pandoc или LibreOffice.
-    Возвращает (успех, путь_к_файлу_или_ошибка).
-    """
-    docx_file = os.path.join(output_dir, f"{filename}.docx")
-    
-    # Сначала пробуем pandoc (более надежно для LaTeX -> DOCX)
-    try:
-        # Создаем временный tex файл
-        tex_file = os.path.join(output_dir, f"{filename}_temp.tex")
-        with open(tex_file, 'w', encoding='utf-8') as f:
-            f.write(tex_content)
-        
-        # Пробуем pandoc
-        pandoc_process = await asyncio.create_subprocess_exec(
-            'pandoc',
-            tex_file,
-            '-o', docx_file,
-            '--from=latex',
-            '--to=docx',
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
-        )
-        
-        stdout, stderr = await pandoc_process.communicate()
-        
-        if pandoc_process.returncode == 0 and os.path.exists(docx_file):
-            # Удаляем временный файл
-            try:
-                os.remove(tex_file)
-            except:
-                pass
-            return True, docx_file
-            
-    except Exception as e:
-        # pandoc не найден или не работает, пробуем LibreOffice
-        pass
-    
-    # Если pandoc не сработал, пробуем LibreOffice через ODT
-    libreoffice_commands = [
-        'libreoffice',  # Linux/Windows в PATH
-        '/Applications/LibreOffice.app/Contents/MacOS/soffice',  # macOS стандартная установка
-        '/usr/bin/libreoffice',  # Linux системная установка
-        'soffice'  # Альтернативное имя
-    ]
-    
-    for cmd in libreoffice_commands:
-        try:
-            # Проверяем доступность команды
-            check_process = await asyncio.create_subprocess_exec(
-                cmd, '--version',
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
-            )
-            await check_process.communicate()
-            
-            if check_process.returncode == 0:
-                # Создаем простой ODT файл из текста (без LaTeX команд)
-                # Извлекаем только текстовое содержимое
-                import re
-                
-                # Убираем LaTeX команды и оставляем только текст
-                clean_text = re.sub(r'\\[a-zA-Z]+\{[^}]*\}', '', tex_content)
-                clean_text = re.sub(r'\\[a-zA-Z]+', '', clean_text)
-                clean_text = re.sub(r'\{[^}]*\}', '', clean_text)
-                clean_text = re.sub(r'\\\\', '\n', clean_text)
-                clean_text = re.sub(r'\n\s*\n', '\n\n', clean_text)
-                
-                # Создаем простой текстовый файл
-                txt_file = os.path.join(output_dir, f"{filename}_temp.txt")
-                with open(txt_file, 'w', encoding='utf-8') as f:
-                    f.write(clean_text)
-                
-                # Конвертируем TXT в DOCX
-                process = await asyncio.create_subprocess_exec(
-                    cmd,
-                    '--headless',
-                    '--convert-to', 'docx',
-                    '--outdir', output_dir,
-                    txt_file,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
-                )
-                
-                stdout, stderr = await process.communicate()
-                
-                # Переименовываем результат
-                txt_docx = os.path.join(output_dir, f"{filename}_temp.docx")
-                if process.returncode == 0 and os.path.exists(txt_docx):
-                    try:
-                        os.rename(txt_docx, docx_file)
-                        os.remove(txt_file)
-                        return True, docx_file
-                    except:
-                        pass
-                
-                # Очищаем временные файлы
-                try:
-                    os.remove(txt_file)
-                    if os.path.exists(txt_docx):
-                        os.remove(txt_docx)
-                except:
-                    pass
-                    
-        except Exception as e:
-            continue
-    
-    return False, "Neither pandoc nor LibreOffice could convert to DOCX"
 
 async def generate_work_async(
         order_id: int,
@@ -304,6 +30,14 @@ async def generate_work_async(
     """
     Основная асинхронная функция генерации работы.
     Полная реализация с генерацией файлов и отправкой пользователю.
+    
+    Args:
+        order_id: ID заказа в базе данных
+        thread_id: ID потока OpenAI
+        model_name: Название модели GPT
+        bot: Экземпляр бота Telegram
+        chat_id: ID чата пользователя
+        message_id_to_edit: ID сообщения для редактирования прогресса
     """
     temp_dir = None
     try:
@@ -319,33 +53,16 @@ async def generate_work_async(
         work_type = order_info['work_type']
 
         # --- Этап 1: Составление плана ---
-        progress_text = (
-            f"{READY_SYMBOL * 1}{UNREADY_SYMBOL * 9}\n"
-            "🤖 Этап 1/6: Составляю план работы..."
-        )
-        await bot.edit_message_text(text=progress_text, chat_id=chat_id, message_id=message_id_to_edit)
-
-        plan_prompt = f"Составь подробный план для {work_type.lower()} на тему '{theme}' объемом {pages} страниц. План должен состоять из введения, 3-4 глав (каждая с 2-3 подразделами) и заключения."
-        plan = await ask_assistant(thread_id, plan_prompt, model_name)
+        await _update_progress(bot, chat_id, message_id_to_edit, 1, "Составляю план работы...")
+        plan = await generate_work_plan(thread_id, model_name, theme, pages, work_type)
 
         # --- Этап 2: Генерация полного содержания ---
-        progress_text = (
-            f"{READY_SYMBOL * 2}{UNREADY_SYMBOL * 8}\n"
-            "✅ План готов. Этап 2/6: Генерирую полное содержание работы..."
-        )
-        await bot.edit_message_text(text=progress_text, chat_id=chat_id, message_id=message_id_to_edit)
-
+        await _update_progress(bot, chat_id, message_id_to_edit, 2, "Генерирую полное содержание работы...")
         content = await generate_full_work_content(thread_id, model_name, theme, pages, work_type)
 
         # --- Этап 3: Формирование LaTeX документа ---
-        progress_text = (
-            f"{READY_SYMBOL * 4}{UNREADY_SYMBOL * 6}\n"
-            "✅ Содержание готово. Этап 3/6: Формирую LaTeX документ..."
-        )
-        await bot.edit_message_text(text=progress_text, chat_id=chat_id, message_id=message_id_to_edit)
-
-        # Создаем полный LaTeX документ
-        full_tex = LATEX_TEMPLATE.format(theme=theme, content=content)
+        await _update_progress(bot, chat_id, message_id_to_edit, 3, "Формирую LaTeX документ...")
+        full_tex = create_latex_document(theme, content)
         
         # Сохраняем tex в БД
         await save_full_tex(order_id, full_tex)
@@ -360,23 +77,10 @@ async def generate_work_async(
             f.write(full_tex)
 
         # Отправляем .tex файл админу для отладки (всегда, до компиляции)
-        try:
-            tex_file = FSInputFile(tex_path, filename=f"coursework_{order_id}.tex")
-            await bot.send_document(
-                chat_id=settings.admin_id,
-                document=tex_file,
-                caption=f"📄 LaTeX файл для заказа #{order_id}\n\nТема: {theme[:100]}"
-            )
-        except Exception as admin_error:
-            print(f"Failed to send tex file to admin: {admin_error}")
+        await send_tex_file_to_admin(bot, order_id, tex_path, theme)
 
         # --- Этап 4: Компиляция в PDF ---
-        progress_text = (
-            f"{READY_SYMBOL * 6}{UNREADY_SYMBOL * 4}\n"
-            "✅ LaTeX готов. Этап 4/6: Компилирую PDF..."
-        )
-        await bot.edit_message_text(text=progress_text, chat_id=chat_id, message_id=message_id_to_edit)
-
+        await _update_progress(bot, chat_id, message_id_to_edit, 4, "Компилирую PDF...")
         success, result = await compile_latex_to_pdf(full_tex, temp_dir, filename)
         if not success:
             raise Exception(f"Ошибка компиляции LaTeX: {result}")
@@ -384,12 +88,7 @@ async def generate_work_async(
         pdf_path = result
 
         # --- Этап 5: Конвертация в DOCX ---
-        progress_text = (
-            f"{READY_SYMBOL * 8}{UNREADY_SYMBOL * 2}\n"
-            "✅ PDF готов. Этап 5/6: Конвертирую в DOCX..."
-        )
-        await bot.edit_message_text(text=progress_text, chat_id=chat_id, message_id=message_id_to_edit)
-
+        await _update_progress(bot, chat_id, message_id_to_edit, 5, "Конвертирую в DOCX...")
         success, result = await convert_tex_to_docx(full_tex, temp_dir, filename)
         if not success:
             # Если конвертация не удалась, продолжаем без DOCX
@@ -399,37 +98,8 @@ async def generate_work_async(
             docx_path = result
 
         # --- Этап 6: Отправка файлов ---
-        progress_text = (
-            f"{READY_SYMBOL * 10}{UNREADY_SYMBOL * 0}\n"
-            "✅ Файлы готовы. Этап 6/6: Отправляю результат..."
-        )
-        await bot.edit_message_text(text=progress_text, chat_id=chat_id, message_id=message_id_to_edit)
-
-        # Отправляем файлы пользователю
-        files_sent = 0
-        
-        # Отправляем PDF
-        if os.path.exists(pdf_path):
-            # Безопасное имя файла
-            safe_filename = "".join(c for c in theme if c.isalnum() or c in (' ', '-', '_')).rstrip()[:30]
-            pdf_file = FSInputFile(pdf_path, filename=f"{safe_filename}.pdf")
-            await bot.send_document(
-                chat_id=chat_id,
-                document=pdf_file,
-                caption="📄 PDF версия вашей работы"
-            )
-            files_sent += 1
-        
-        # Отправляем DOCX если удалось создать
-        if docx_path and os.path.exists(docx_path):
-            safe_filename = "".join(c for c in theme if c.isalnum() or c in (' ', '-', '_')).rstrip()[:30]
-            docx_file = FSInputFile(docx_path, filename=f"{safe_filename}.docx")
-            await bot.send_document(
-                chat_id=chat_id,
-                document=docx_file,
-                caption="📝 DOCX версия для редактирования"
-            )
-            files_sent += 1
+        await _update_progress(bot, chat_id, message_id_to_edit, 6, "Отправляю результат...")
+        files_sent = await send_generated_files_to_user(bot, chat_id, pdf_path, docx_path, theme)
 
         # Финальное сообщение
         await bot.edit_message_text(
@@ -441,7 +111,7 @@ async def generate_work_async(
         # Отправляем итоговое сообщение
         final_message = f"🎉 Поздравляю! Ваша работа успешно сгенерирована!\n\n📁 Отправлено файлов: {files_sent}"
         if docx_path is None:
-            final_message += "\n\n⚠️ DOCX файл не создан (требуется LibreOffice)"
+            final_message += "\n\n⚠️ DOCX файл не создан (требуется LibreOffice или Pandoc)"
         
         await bot.send_message(chat_id=chat_id, text=final_message)
 
@@ -452,27 +122,7 @@ async def generate_work_async(
         await update_order_status(order_id, 'failed')
         
         # Отправляем лог об ошибке админу
-        try:
-            order_info = await get_order_info(order_id)
-            if order_info:
-                # Создаем фиктивного пользователя для лога
-                class FakeUser:
-                    def __init__(self, user_id):
-                        self.id = user_id
-                        self.full_name = f"User {user_id}"
-                        self.username = None
-                
-                fake_user = FakeUser(order_info['user_id'])
-                await send_admin_log(
-                    bot,
-                    fake_user,
-                    f"🚨 <b>Ошибка генерации работы</b>\n"
-                    f"  <b>Заказ:</b> #{order_id}\n"
-                    f"  <b>Тема:</b> {order_info['theme'][:100]}...\n"
-                    f"  <b>Ошибка:</b> {str(e)[:200]}..."
-                )
-        except Exception as admin_error:
-            print(f"Failed to send error log to admin: {admin_error}")
+        await send_error_log_to_admin(bot, order_id, e)
         
         # Короткое сообщение об ошибке для пользователя
         error_text = str(e)[:200] + "..." if len(str(e)) > 200 else str(e)
@@ -501,7 +151,24 @@ async def generate_work_async(
         # Очищаем временные файлы
         if temp_dir and os.path.exists(temp_dir):
             try:
-                import shutil
                 shutil.rmtree(temp_dir)
             except Exception as cleanup_error:
                 print(f"Failed to cleanup temp directory: {cleanup_error}")
+
+
+async def _update_progress(bot: Bot, chat_id: int, message_id: int, stage: int, description: str) -> None:
+    """
+    Обновляет прогресс-бар в сообщении.
+    
+    Args:
+        bot: Экземпляр бота
+        chat_id: ID чата
+        message_id: ID сообщения для редактирования
+        stage: Номер текущего этапа (1-6)
+        description: Описание текущего этапа
+    """
+    progress_text = (
+        f"{READY_SYMBOL * stage}{UNREADY_SYMBOL * (10 - stage)}\n"
+        f"🤖 Этап {stage}/6: {description}"
+    )
+    await bot.edit_message_text(text=progress_text, chat_id=chat_id, message_id=message_id)
