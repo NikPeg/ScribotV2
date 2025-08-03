@@ -64,6 +64,7 @@ LATEX_TEMPLATE = r"""
 def fix_bibliography_ampersands(content: str) -> str:
     """
     Экранирует символы & только в разделе "Список использованных источников".
+    Учитывает случаи, когда GPT уже экранировал символы.
     """
     # Ищем раздел со списком литературы
     bibliography_patterns = [
@@ -76,13 +77,33 @@ def fix_bibliography_ampersands(content: str) -> str:
         match = re.search(pattern, content, re.DOTALL | re.IGNORECASE)
         if match:
             bibliography_section = match.group(1)
-            # Экранируем & только в этом разделе
-            fixed_bibliography = bibliography_section.replace('&', '\\&')
+            # Умное экранирование: экранируем только неэкранированные &
+            fixed_bibliography = smart_escape_ampersands(bibliography_section)
             # Заменяем в исходном тексте
             content = content.replace(bibliography_section, fixed_bibliography)
             break
     
     return content
+
+
+def smart_escape_ampersands(text: str) -> str:
+    """
+    Умно экранирует символы &, избегая двойного экранирования.
+    
+    Args:
+        text: Текст для обработки
+    
+    Returns:
+        Текст с правильно экранированными символами &
+    """
+    # Сначала нормализуем - убираем двойное экранирование если оно есть
+    text = text.replace('\\\\&', '\\&')
+    
+    # Теперь экранируем только неэкранированные &
+    # Используем negative lookbehind чтобы не трогать уже экранированные
+    text = re.sub(r'(?<!\\)&', r'\\&', text)
+    
+    return text
 
 def create_latex_document(theme: str, content: str) -> str:
     """

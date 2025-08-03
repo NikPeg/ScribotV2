@@ -9,10 +9,11 @@ import shutil
 from aiogram import Bot
 
 from db.database import update_order_status, save_full_tex, get_order_info
-from core.content_generator import generate_work_plan, generate_full_work_content
+from core.content_generator import generate_work_plan, generate_work_content_stepwise
 from core.latex_template import create_latex_document
 from core.document_converter import compile_latex_to_pdf, convert_tex_to_docx
 from core.file_sender import send_tex_file_to_admin, send_generated_files_to_user, send_error_log_to_admin
+from core.page_calculator import count_pages_in_text
 
 # Для "прогресс-бара"
 READY_SYMBOL = "🟦"
@@ -56,9 +57,22 @@ async def generate_work_async(
         await _update_progress(bot, chat_id, message_id_to_edit, 1, "Составляю план работы...")
         plan = await generate_work_plan(thread_id, model_name, theme, pages, work_type)
 
-        # --- Этап 2: Генерация полного содержания ---
-        await _update_progress(bot, chat_id, message_id_to_edit, 2, "Генерирую полное содержание работы...")
-        content = await generate_full_work_content(thread_id, model_name, theme, pages, work_type)
+        # --- Этап 2: Пошаговая генерация содержания с контролем объема ---
+        await _update_progress(bot, chat_id, message_id_to_edit, 2, "Генерирую содержание по главам...")
+        
+        # Создаем callback для обновления прогресса генерации
+        async def content_progress_callback(description: str, progress: int):
+            # Прогресс от 2 до 3 этапа (20% - 30%)
+            stage_progress = 2 + (progress / 100)
+            await _update_progress_detailed(bot, chat_id, message_id_to_edit, stage_progress, description)
+        
+        content = await generate_work_content_stepwise(
+            thread_id, model_name, theme, pages, work_type, plan, content_progress_callback
+        )
+        
+        # Подсчитываем фактическое количество страниц
+        actual_pages = count_pages_in_text(content)
+        print(f"Generated content: {actual_pages:.1f} pages (target: {pages})")
 
         # --- Этап 3: Формирование LaTeX документа ---
         await _update_progress(bot, chat_id, message_id_to_edit, 3, "Формирую LaTeX документ...")
@@ -172,3 +186,30 @@ async def _update_progress(bot: Bot, chat_id: int, message_id: int, stage: int, 
         f"🤖 Этап {stage}/6: {description}"
     )
     await bot.edit_message_text(text=progress_text, chat_id=chat_id, message_id=message_id)
+
+
+async def _update_progress_detailed(bot: Bot, chat_id: int, message_id: int, stage: float, description: str) -> None:
+    """
+    Обновляет прогресс-бар с дробными этапами для детального отображения.
+    
+    Args:
+        bot: Экземпляр бота
+        chat_id: ID чата
+        message_id: ID сообщения для редактирования
+        stage: Номер текущего этапа (может быть дробным)
+        description: Описание текущего этапа
+    """
+    stage_int = int(stage)
+    progress_symbols = int(stage * 10 / 6)  # Масштабируем к 10 символам
+    progress_symbols = min(10, max(0, progress_symbols))
+    
+    progress_text = (
+        f"{READY_SYMBOL * progress_symbols}{UNREADY_SYMBOL * (10 - progress_symbols)}\n"
+        f"🤖 Этап {stage_int}/6: {description}"
+    )
+    
+    try:
+        await bot.edit_message_text(text=progress_text, chat_id=chat_id, message_id=message_id)
+    except Exception as e:
+        # Игнорируем ошибки обновления прогресса, чтобы не прерывать генерацию
+        print(f"Failed to update progress: {e}")
