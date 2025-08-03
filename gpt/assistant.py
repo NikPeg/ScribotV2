@@ -8,12 +8,10 @@ client = AsyncOpenAI(api_key=settings.openai_api_key)
 # Словарь для хранения ID ассистентов.
 # Вы можете заранее создать их, скопировать ID из консоли
 # и вставить сюда для ускорения первого запуска.
-# Например:
-# ASSISTANT_IDS = {
-#     "gpt-3.5-turbo": "asst_...",
-#     "gpt-4o-mini": "asst_..."
-# }
-ASSISTANT_IDS = {}
+ASSISTANT_IDS = {
+    "gpt-3.5-turbo": "asst_lAXuQ4InHOPz6L5YPuUxlaxt",
+    "gpt-4o-mini": "asst_PMHKofEW6rucU4D6k5uJq4xF",
+}
 
 # Общий system prompt для всех ассистентов
 COMMON_INSTRUCTIONS = (

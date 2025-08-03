@@ -47,3 +47,28 @@ async def update_order_thread_id(order_id: int, thread_id: str):
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute('UPDATE works SET openai_thread_id = ? WHERE id = ?', (thread_id, order_id))
         await db.commit()
+
+async def save_full_tex(order_id: int, tex_content: str):
+    """Сохраняет полный tex-файл работы в БД."""
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute('UPDATE works SET full_tex = ? WHERE id = ?', (tex_content, order_id))
+        await db.commit()
+
+async def get_order_info(order_id: int):
+    """Получает информацию о заказе по ID."""
+    async with aiosqlite.connect(DB_NAME) as db:
+        cursor = await db.execute(
+            'SELECT user_id, theme, pages, work_type, gpt_model, full_tex FROM works WHERE id = ?',
+            (order_id,)
+        )
+        row = await cursor.fetchone()
+        if row:
+            return {
+                'user_id': row[0],
+                'theme': row[1],
+                'pages': row[2],
+                'work_type': row[3],
+                'gpt_model': row[4],
+                'full_tex': row[5]
+            }
+        return None
