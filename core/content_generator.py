@@ -155,7 +155,7 @@ async def generate_chapter_content(
 - Методы исследования
 - Структуру работы
 
-Объем: примерно {int(target_pages * 2500)} символов.
+Объем: примерно {int(target_pages * 1500)} символов.
 Формат: LaTeX (используй \\section{{Введение}} в начале).
 НЕ используй длинные строки - разбивай на короткие (до 80 символов).
 """
@@ -170,7 +170,7 @@ async def generate_chapter_content(
 - Практическую значимость результатов
 - Перспективы дальнейших исследований
 
-Объем: примерно {int(target_pages * 2500)} символов.
+Объем: примерно {int(target_pages * 1500)} символов.
 Формат: LaTeX (используй \\section{{Заключение}} в начале).
 НЕ используй длинные строки - разбивай на короткие (до 80 символов).
 """
@@ -201,7 +201,7 @@ async def generate_chapter_content(
 - Практические аспекты
 - Примеры и иллюстрации
 
-Объем: примерно {int(target_pages * 2500)} символов.
+Объем: примерно {int(target_pages * 1500)} символов.
 Формат: LaTeX (используй \\section{{{chapter_title}}} в начале).
 НЕ используй длинные строки - разбивай на короткие (до 80 символов).
 Можешь включить формулы, таблицы или рисунки где уместно.
@@ -251,13 +251,24 @@ async def generate_subsections_content(
         subsection_prompt = f"""
 Напиши подраздел "{subsection}" для главы "{chapter_title}" в работе на тему "{theme}".
 
+ВАЖНО: Это подраздел, а НЕ отдельная глава!
+
 Подраздел должен быть детальным и содержательным.
-Объем: примерно {int(pages_per_subsection * 2500)} символов.
-Формат: LaTeX (используй \\subsection{{{subsection}}} в начале).
-НЕ используй длинные строки - разбивай на короткие (до 80 символов).
+Объем: примерно {int(pages_per_subsection * 1500)} символов.
+
+Формат: LaTeX
+- ОБЯЗАТЕЛЬНО используй \\subsection{{{subsection}}} в начале (НЕ \\section!)
+- НЕ используй длинные строки - разбивай на короткие (до 80 символов)
+- Пиши академический текст с примерами и анализом
+
+Начни с команды \\subsection{{{subsection}}} и продолжи содержанием.
 """
         
         subsection_content = await ask_assistant(thread_id, subsection_prompt, model_name)
+        
+        # Дополнительная проверка и исправление: заменяем \section на \subsection если GPT ошибся
+        subsection_content = fix_section_commands(subsection_content, subsection)
+        
         subsections_content += subsection_content + "\n\n"
     
     return subsections_content.strip()
@@ -299,3 +310,35 @@ async def generate_full_work_content_legacy(thread_id: str, model_name: str, the
 """
     
     return await ask_assistant(thread_id, full_work_prompt, model_name)
+
+
+def fix_section_commands(content: str, expected_subsection_title: str) -> str:
+    """
+    Исправляет неправильные команды LaTeX в подразделах.
+    Заменяет \section на \subsection если GPT ошибся.
+    
+    Args:
+        content: Содержание подраздела
+        expected_subsection_title: Ожидаемое название подраздела
+    
+    Returns:
+        Исправленное содержание
+    """
+    import re
+    
+    # Ищем команды \section в начале содержания
+    section_pattern = r'^\\section\{([^}]+)\}'
+    match = re.search(section_pattern, content.strip(), re.MULTILINE)
+    
+    if match:
+        section_title = match.group(1)
+        # Заменяем \section на \subsection
+        content = re.sub(section_pattern, f'\\\\subsection{{{section_title}}}', content, count=1)
+        print(f"Fixed: Changed \\section{{{section_title}}} to \\subsection{{{section_title}}}")
+    
+    # Дополнительная проверка: если нет ни \section, ни \subsection в начале, добавляем \subsection
+    if not re.search(r'^\\(sub)?section\{', content.strip(), re.MULTILINE):
+        content = f"\\subsection{{{expected_subsection_title}}}\n\n{content}"
+        print(f"Added missing \\subsection{{{expected_subsection_title}}}")
+    
+    return content
