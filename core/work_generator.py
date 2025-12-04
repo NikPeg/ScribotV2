@@ -13,7 +13,7 @@ from core.content_generator import generate_work_plan, generate_work_content_ste
 from core.latex_template import create_latex_document
 from core.document_converter import compile_latex_to_pdf, convert_tex_to_docx
 from core.file_sender import send_tex_file_to_admin, send_generated_files_to_user, send_error_log_to_admin
-from core.page_calculator import count_pages_in_text
+from core.page_calculator import count_pages_in_text, count_total_pages_in_document, parse_work_plan
 from gpt.assistant import clear_conversation
 
 # Исключение для ошибок компиляции LaTeX
@@ -77,8 +77,16 @@ async def generate_work_async(
         )
         
         # Подсчитываем фактическое количество страниц
-        actual_pages = count_pages_in_text(content)
-        print(f"Generated content: {actual_pages:.1f} pages (target: {pages})")
+        # Парсим план для определения количества глав
+        try:
+            chapters = parse_work_plan(plan)
+            num_chapters = len(chapters)
+        except Exception:
+            num_chapters = 0
+        
+        content_pages = count_pages_in_text(content)
+        total_pages = count_total_pages_in_document(content, num_chapters)
+        print(f"Generated content: {content_pages:.1f} pages of content, {total_pages:.1f} total pages (target: {pages})")
 
         # --- Этап 3: Формирование LaTeX документа ---
         await _update_progress(bot, chat_id, message_id_to_edit, 3, "Формирую LaTeX документ...")

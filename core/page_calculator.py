@@ -7,23 +7,70 @@ from typing import List, Dict, Tuple
 
 
 # Константы для расчета страниц
-SYMBOLS_IN_PAGE = 1400
+# Учитываем, что в LaTeX документе:
+# - Титульный лист занимает ~1 страницу
+# - Оглавление занимает ~0.5-1 страницу
+# - Заголовки, пустые строки, форматирование уменьшают реальный объем текста на странице
+# - Реальный объем текста на странице A4 с полями 3см/1.5см/2см/2см и полуторным интервалом ~1200-1300 символов
+SYMBOLS_IN_PAGE = 1250  # Более реалистичное значение с учетом форматирования LaTeX
+
+# Дополнительные страницы, которые занимают служебные элементы
+TITLE_PAGE_PAGES = 1.0  # Титульный лист
+TOC_PAGES_BASE = 0.5    # Базовое количество страниц для оглавления
+TOC_PAGES_PER_CHAPTER = 0.05  # Дополнительные страницы оглавления на каждую главу
 
 
 def count_pages_in_text(text: str) -> float:
     """
     Подсчитывает количество страниц в тексте на основе символов.
+    Учитывает только содержание (без титульного листа и оглавления).
     
     Args:
         text: Текст для подсчета
     
     Returns:
-        Количество страниц (может быть дробным)
+        Количество страниц содержания (может быть дробным)
     """
     # Убираем LaTeX команды для более точного подсчета
     clean_text = remove_latex_commands(text)
     symbol_count = len(clean_text)
     return symbol_count / SYMBOLS_IN_PAGE
+
+
+def count_total_pages_in_document(content_text: str, num_chapters: int = 0) -> float:
+    """
+    Подсчитывает общее количество страниц в полном LaTeX документе.
+    Учитывает титульный лист, оглавление и содержание.
+    
+    Args:
+        content_text: Текст содержания (без титульного листа и оглавления)
+        num_chapters: Количество глав (для расчета размера оглавления)
+    
+    Returns:
+        Общее количество страниц в докуменte
+    """
+    content_pages = count_pages_in_text(content_text)
+    toc_pages = TOC_PAGES_BASE + (num_chapters * TOC_PAGES_PER_CHAPTER)
+    total_pages = TITLE_PAGE_PAGES + toc_pages + content_pages
+    return total_pages
+
+
+def calculate_content_pages_for_target(total_target_pages: int, num_chapters: int = 0) -> float:
+    """
+    Рассчитывает, сколько страниц содержания нужно сгенерировать,
+    чтобы получить документ нужного объема с учетом титульного листа и оглавления.
+    
+    Args:
+        total_target_pages: Общее целевое количество страниц в документе
+        num_chapters: Количество глав (для расчета размера оглавления)
+    
+    Returns:
+        Необходимое количество страниц содержания
+    """
+    toc_pages = TOC_PAGES_BASE + (num_chapters * TOC_PAGES_PER_CHAPTER)
+    service_pages = TITLE_PAGE_PAGES + toc_pages
+    content_pages = max(1.0, total_target_pages - service_pages)
+    return content_pages
 
 
 def remove_latex_commands(text: str) -> str:

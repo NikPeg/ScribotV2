@@ -9,7 +9,8 @@ from core.page_calculator import (
     calculate_pages_per_chapter, 
     count_pages_in_text,
     should_generate_subsections,
-    is_chapter_complete
+    is_chapter_complete,
+    calculate_content_pages_for_target
 )
 
 
@@ -93,8 +94,13 @@ async def generate_work_content_stepwise(
         else:
             main_chapters.append(chapter)
     
+    # Рассчитываем, сколько страниц содержания нужно сгенерировать
+    # Учитываем, что титульный лист и оглавление займут ~1.5-2 страницы
+    content_target_pages = calculate_content_pages_for_target(pages, len(main_chapters))
+    
     # Рассчитываем страницы для основных глав (исключая список источников)
-    pages_per_chapter = calculate_pages_per_chapter(pages - 0.5, main_chapters)  # Резервируем 0.5 стр для списка
+    # Резервируем 0.5 стр для списка источников
+    pages_per_chapter = calculate_pages_per_chapter(content_target_pages - 0.5, main_chapters)
     
     full_content = ""
     total_pages_generated = 0.0
@@ -129,8 +135,9 @@ async def generate_work_content_stepwise(
         full_content += chapter_content + "\n\n\\newpage\n\n"
         total_pages_generated += current_chapter_pages
         
-        # Проверяем, не превысили ли общий объем
-        if total_pages_generated >= pages * 1.1:
+        # Проверяем, не превысили ли общий объем содержания
+        # Учитываем, что в полном документе будет еще титульный лист и оглавление
+        if total_pages_generated >= content_target_pages * 1.15:  # Допускаем 15% превышение
             break
     
     # Всегда добавляем список источников в конце
@@ -191,7 +198,7 @@ async def generate_chapter_content(
 - Методы исследования
 - Структуру работы
 
-Объем: примерно {int(target_pages * 1500)} символов.
+Объем: примерно {int(target_pages * 1250)} символов.
 Формат: LaTeX (используй \\section{{Введение}} в начале).
 НЕ используй длинные строки - разбивай на короткие (до 80 символов).
 Используй ссылки на источники через команду \\cite{{source1}}, \\cite{{source2}} и т.д. где уместно.
@@ -207,7 +214,7 @@ async def generate_chapter_content(
 - Практическую значимость результатов
 - Перспективы дальнейших исследований
 
-Объем: примерно {int(target_pages * 1500)} символов.
+Объем: примерно {int(target_pages * 1250)} символов.
 Формат: LaTeX (используй \\section{{Заключение}} в начале).
 НЕ используй длинные строки - разбивай на короткие (до 80 символов).
 Используй ссылки на источники через команду \\cite{{source1}}, \\cite{{source2}} и т.д. где уместно.
@@ -248,7 +255,7 @@ async def generate_chapter_content(
 - Практические аспекты
 - Примеры и иллюстрации
 
-Объем: примерно {int(target_pages * 1500)} символов.
+Объем: примерно {int(target_pages * 1250)} символов.
 Формат: LaTeX (используй \\section{{{chapter_title}}} в начале).
 НЕ используй длинные строки - разбивай на короткие (до 80 символов).
 Можешь включить формулы, таблицы или рисунки где уместно.
@@ -302,7 +309,7 @@ async def generate_subsections_content(
 ВАЖНО: Это подраздел, а НЕ отдельная глава!
 
 Подраздел должен быть детальным и содержательным.
-Объем: примерно {int(pages_per_subsection * 1500)} символов.
+Объем: примерно {int(pages_per_subsection * 1250)} символов.
 
 Формат: LaTeX
 - ОБЯЗАТЕЛЬНО используй \\subsection{{{subsection}}} в начале (НЕ \\section!)
