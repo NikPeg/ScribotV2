@@ -6,7 +6,7 @@ import re
 
 # Шаблон LaTeX документа
 LATEX_TEMPLATE = r"""
-\documentclass[12pt,a4paper]{{article}}
+\documentclass[12pt,a4paper,draft]{{article}}
 \usepackage[utf8]{{inputenc}}
 \usepackage[T2A]{{fontenc}}
 \usepackage[russian]{{babel}}

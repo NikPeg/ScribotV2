@@ -55,22 +55,31 @@ async def compile_latex_to_pdf(tex_content: str, output_dir: str, filename: str)
         
         stdout2, stderr2 = await process2.communicate()
         
-        # Проверяем результат второго прохода
-        if process2.returncode == 0 and os.path.exists(pdf_file):
-            return True, pdf_file
+        # Проверяем результат: главное - наличие PDF файла
+        # pdflatex может возвращать ненулевой код даже при успешной компиляции (warnings)
+        if os.path.exists(pdf_file):
+            # Проверяем размер файла - если он слишком маленький, возможно компиляция не удалась
+            file_size = os.path.getsize(pdf_file)
+            if file_size > 1000:  # Минимальный размер PDF (1KB)
+                return True, pdf_file
+        
+        # Если PDF не создан или слишком маленький - это реальная ошибка
+        # Собираем полный текст ошибки без обрезки
+        stdout1_text = stdout1.decode('utf-8', errors='ignore')
+        stdout2_text = stdout2.decode('utf-8', errors='ignore')
+        stderr1_text = stderr1.decode('utf-8', errors='ignore')
+        stderr2_text = stderr2.decode('utf-8', errors='ignore')
+        
+        error_msg = f"LaTeX compilation failed. Return code: {process2.returncode}\n"
+        if not os.path.exists(pdf_file):
+            error_msg += "PDF file was not created.\n"
         else:
-            # Собираем полный текст ошибки без обрезки
-            stdout1_text = stdout1.decode('utf-8', errors='ignore')
-            stdout2_text = stdout2.decode('utf-8', errors='ignore')
-            stderr1_text = stderr1.decode('utf-8', errors='ignore')
-            stderr2_text = stderr2.decode('utf-8', errors='ignore')
-            
-            error_msg = f"LaTeX compilation failed on second pass. Return code: {process2.returncode}\n\n"
-            error_msg += f"=== First pass stdout ===\n{stdout1_text}\n\n"
-            error_msg += f"=== First pass stderr ===\n{stderr1_text}\n\n"
-            error_msg += f"=== Second pass stdout ===\n{stdout2_text}\n\n"
-            error_msg += f"=== Second pass stderr ===\n{stderr2_text}"
-            return False, error_msg
+            error_msg += f"PDF file exists but is too small ({os.path.getsize(pdf_file)} bytes).\n"
+        error_msg += f"\n=== First pass stdout ===\n{stdout1_text}\n\n"
+        error_msg += f"=== First pass stderr ===\n{stderr1_text}\n\n"
+        error_msg += f"=== Second pass stdout ===\n{stdout2_text}\n\n"
+        error_msg += f"=== Second pass stderr ===\n{stderr2_text}"
+        return False, error_msg
             
     except Exception as e:
         return False, f"Exception during LaTeX compilation: {str(e)}"
