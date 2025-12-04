@@ -73,7 +73,12 @@ async def generate_work_content_stepwise(
         Полное содержание работы в формате LaTeX
     """
     # Парсим план работы
-    chapters = parse_work_plan(plan_text)
+    try:
+        chapters = parse_work_plan(plan_text)
+    except Exception:
+        # Fallback к старому методу если план не распарсился
+        return await generate_full_work_content_legacy(order_id, model_name, theme, pages, work_type)
+    
     if not chapters:
         # Fallback к старому методу если план не распарсился
         return await generate_full_work_content_legacy(order_id, model_name, theme, pages, work_type)
@@ -189,6 +194,7 @@ async def generate_chapter_content(
 Объем: примерно {int(target_pages * 1500)} символов.
 Формат: LaTeX (используй \\section{{Введение}} в начале).
 НЕ используй длинные строки - разбивай на короткие (до 80 символов).
+Используй ссылки на источники через команду \\cite{{source1}}, \\cite{{source2}} и т.д. где уместно.
 """
     
     elif 'заключение' in title_lower:
@@ -204,6 +210,7 @@ async def generate_chapter_content(
 Объем: примерно {int(target_pages * 1500)} символов.
 Формат: LaTeX (используй \\section{{Заключение}} в начале).
 НЕ используй длинные строки - разбивай на короткие (до 80 символов).
+Используй ссылки на источники через команду \\cite{{source1}}, \\cite{{source2}} и т.д. где уместно.
 """
     
     elif 'список' in title_lower or 'библиография' in title_lower:
@@ -217,8 +224,17 @@ async def generate_chapter_content(
 - Интернет-ресурсы
 - Нормативные документы (если применимо)
 
-Формат: LaTeX (используй \\section{{Список использованных источников}} в начале).
-Используй нумерованный список \\begin{{enumerate}} \\item ... \\end{{enumerate}}.
+ВАЖНО: Используй формат LaTeX thebibliography для корректной работы ссылок!
+
+Формат должен быть:
+\\section{{Список использованных источников}}
+
+\\begin{{thebibliography}}{{99}}
+\\bibitem{{source1}} Ананьева, Т.И. Физиология высшей нервной деятельности / Т.И. Ананьева. - М.: Медицина, 2018. - 432 с.
+\\bibitem{{source2}} Следующий источник...
+\\end{{thebibliography}}
+
+Каждый источник должен иметь уникальный ключ (source1, source2, source3 и т.д.) в команде \\bibitem{{ключ}}.
 НЕ используй длинные строки - разбивай на короткие (до 80 символов).
 """
     
@@ -236,6 +252,7 @@ async def generate_chapter_content(
 Формат: LaTeX (используй \\section{{{chapter_title}}} в начале).
 НЕ используй длинные строки - разбивай на короткие (до 80 символов).
 Можешь включить формулы, таблицы или рисунки где уместно.
+Используй ссылки на источники через команду \\cite{{source1}}, \\cite{{source2}} и т.д. где уместно.
 """
     
     return await ask_assistant(order_id, prompt, model_name)
@@ -291,6 +308,7 @@ async def generate_subsections_content(
 - ОБЯЗАТЕЛЬНО используй \\subsection{{{subsection}}} в начале (НЕ \\section!)
 - НЕ используй длинные строки - разбивай на короткие (до 80 символов)
 - Пиши академический текст с примерами и анализом
+- Используй ссылки на источники через команду \\cite{{source1}}, \\cite{{source2}} и т.д. где уместно
 
 Начни с команды \\subsection{{{subsection}}} и продолжи содержанием.
 """
@@ -365,10 +383,14 @@ def fix_section_commands(content: str, expected_subsection_title: str) -> str:
     match = re.search(section_pattern, content.strip(), re.MULTILINE)
     
     if match:
-        section_title = match.group(1)
-        # Заменяем \section на \subsection
-        content = re.sub(section_pattern, f'\\\\subsection{{{section_title}}}', content, count=1)
-        print(f"Fixed: Changed \\section{{{section_title}}} to \\subsection{{{section_title}}}")
+        try:
+            # Проверяем, что группа существует
+            if match.lastindex and match.lastindex >= 1:
+                section_title = match.group(1)
+                # Заменяем \section на \subsection
+                content = re.sub(section_pattern, f'\\\\subsection{{{section_title}}}', content, count=1)
+        except (IndexError, AttributeError):
+            pass
     
     # Дополнительная проверка: если нет ни \section, ни \subsection в начале, добавляем \subsection
     if not re.search(r'^\\(sub)?section\{', content.strip(), re.MULTILINE):

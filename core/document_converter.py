@@ -11,7 +11,7 @@ from typing import Tuple
 async def compile_latex_to_pdf(tex_content: str, output_dir: str, filename: str) -> Tuple[bool, str]:
     """
     Асинхронно компилирует LaTeX в PDF.
-    Запускает pdflatex дважды для корректной генерации содержания и ссылок.
+    Запускает pdflatex дважды для корректной генерации содержания, ссылок и библиографии.
     
     Args:
         tex_content: Содержимое LaTeX файла

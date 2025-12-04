@@ -76,12 +76,17 @@ def fix_bibliography_ampersands(content: str) -> str:
     for pattern in bibliography_patterns:
         match = re.search(pattern, content, re.DOTALL | re.IGNORECASE)
         if match:
-            bibliography_section = match.group(1)
-            # Умное экранирование: экранируем только неэкранированные &
-            fixed_bibliography = smart_escape_ampersands(bibliography_section)
-            # Заменяем в исходном тексте
-            content = content.replace(bibliography_section, fixed_bibliography)
-            break
+            try:
+                # Проверяем, что группа существует
+                if match.lastindex and match.lastindex >= 1:
+                    bibliography_section = match.group(1)
+                    # Умное экранирование: экранируем только неэкранированные &
+                    fixed_bibliography = smart_escape_ampersands(bibliography_section)
+                    # Заменяем в исходном тексте
+                    content = content.replace(bibliography_section, fixed_bibliography)
+                    break
+            except (IndexError, AttributeError):
+                pass
     
     return content
 
@@ -143,7 +148,16 @@ def smart_escape_dollars(text: str) -> str:
     # Паттерн ищет $, за которым следует любой текст (не содержащий $), и затем закрывающий $
     # Но проверяем, что содержимое выглядит как математическое выражение (не просто число)
     def replace_inline_math_if_valid(match):
-        content = match.group(1)
+        try:
+            # Проверяем, что группа существует
+            if match.lastindex and match.lastindex >= 1:
+                content = match.group(1)
+            else:
+                # Если группы нет, возвращаем как есть
+                return match.group(0)
+        except (IndexError, AttributeError):
+            return match.group(0)
+        
         # Проверяем, что содержимое содержит математические символы:
         # буквы, операторы (+, -, *, /, =, <, >), скобки, индексы (^, _), функции и т.д.
         # Если это просто число или число с единицами измерения - это не формула

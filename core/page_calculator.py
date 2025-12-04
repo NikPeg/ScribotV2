@@ -86,8 +86,13 @@ def parse_work_plan(plan_text: str) -> List[Dict[str, str]]:
                     chapters.append(current_chapter)
                 
                 try:
-                    chapter_title = match.group(title_group).strip()
-                except IndexError:
+                    # Проверяем, что группа существует
+                    if match.lastindex and title_group <= match.lastindex:
+                        chapter_title = match.group(title_group).strip()
+                    else:
+                        # Если группа не найдена, берем всю строку без номера
+                        chapter_title = re.sub(r'^[\d\w\.\)\s]+', '', line).strip()
+                except (IndexError, AttributeError):
                     # Если группа не найдена, берем всю строку без номера
                     chapter_title = re.sub(r'^[\d\w\.\)\s]+', '', line).strip()
                 
@@ -109,8 +114,22 @@ def parse_work_plan(plan_text: str) -> List[Dict[str, str]]:
             for pattern in subsection_patterns:
                 match = re.match(pattern, line)
                 if match:
-                    subsection_title = match.group(-1).strip()
-                    current_chapter['subsections'].append(subsection_title)
+                    try:
+                        # Проверяем, что есть группы в совпадении
+                        if match.lastindex:
+                            # Используем последнюю группу
+                            subsection_title = match.group(match.lastindex).strip()
+                        else:
+                            # Если групп нет, берем всю строку после префикса
+                            subsection_title = re.sub(r'^[-\*\d\.\s]+', '', line).strip()
+                        
+                        if subsection_title:
+                            current_chapter['subsections'].append(subsection_title)
+                    except (IndexError, AttributeError):
+                        # Пытаемся извлечь подраздел другим способом
+                        subsection_title = re.sub(r'^[-\*\d\.\s]+', '', line).strip()
+                        if subsection_title:
+                            current_chapter['subsections'].append(subsection_title)
                     break
     
     # Добавляем последнюю главу
