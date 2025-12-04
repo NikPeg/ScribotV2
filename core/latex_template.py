@@ -105,6 +105,30 @@ def smart_escape_ampersands(text: str) -> str:
     
     return text
 
+
+def remove_markdown_code_blocks(content: str) -> str:
+    """
+    Удаляет markdown блоки кода (```latex в начале и ``` в конце).
+    
+    Args:
+        content: Исходный контент
+    
+    Returns:
+        Контент без markdown блоков кода
+    """
+    if not content:
+        return content
+    
+    # Убираем начальный блок ```latex или ```
+    # Проверяем начало строки (может быть с пробелами или переносами)
+    content = re.sub(r'^[\s\n]*```\s*latex\s*\n?', '', content, flags=re.IGNORECASE | re.MULTILINE)
+    content = re.sub(r'^[\s\n]*```\s*\n?', '', content, flags=re.MULTILINE)
+    
+    # Убираем конечный блок ```
+    content = re.sub(r'\n?```\s*[\s\n]*$', '', content, flags=re.MULTILINE)
+    
+    return content.strip()
+
 def create_latex_document(theme: str, content: str) -> str:
     """
     Создает полный LaTeX документ из шаблона и содержания.
@@ -136,6 +160,9 @@ def clean_latex_content(content: str) -> str:
     Returns:
         Очищенный LaTeX контент
     """
+    # Убираем markdown блоки кода (```latex в начале и ``` в конце)
+    content = remove_markdown_code_blocks(content)
+    
     # Убираем потенциально проблемные символы и конструкции
     
     # 1. Экранируем специальные символы LaTeX (кроме тех, что в командах)
