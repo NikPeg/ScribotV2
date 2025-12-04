@@ -16,6 +16,13 @@ from core.file_sender import send_tex_file_to_admin, send_generated_files_to_use
 from core.page_calculator import count_pages_in_text
 from gpt.assistant import clear_conversation
 
+# Исключение для ошибок компиляции LaTeX
+class LaTeXCompilationError(Exception):
+    """Исключение для ошибок компиляции LaTeX с полным текстом ошибки."""
+    def __init__(self, error_details: str):
+        self.error_details = error_details
+        super().__init__("LaTeX compilation failed")
+
 # Для "прогресс-бара"
 READY_SYMBOL = "🟦"
 UNREADY_SYMBOL = "⬜️"
@@ -96,7 +103,7 @@ async def generate_work_async(
         await _update_progress(bot, chat_id, message_id_to_edit, 4, "Компилирую PDF...")
         success, result = await compile_latex_to_pdf(full_tex, temp_dir, filename)
         if not success:
-            raise Exception(f"Ошибка компиляции LaTeX: {result}")
+            raise LaTeXCompilationError(result)
         
         pdf_path = result
 
@@ -134,16 +141,30 @@ async def generate_work_async(
     except Exception as e:
         await update_order_status(order_id, 'failed')
         
-        # Отправляем лог об ошибке админу
-        await send_error_log_to_admin(bot, order_id, e)
+        # Проверяем, является ли это ошибкой компиляции LaTeX
+        is_latex_error = isinstance(e, LaTeXCompilationError)
         
-        # Короткое сообщение об ошибке для пользователя
-        error_text = str(e)[:200] + "..." if len(str(e)) > 200 else str(e)
-        error_text = error_text.replace('<', '&lt;').replace('>', '&gt;')
-        error_message = f"❌ Произошла ошибка во время генерации:\n\n{error_text}"
+        # Отправляем лог об ошибке админу (с полным текстом для LaTeX ошибок)
+        await send_error_log_to_admin(bot, order_id, e, is_latex_error=is_latex_error)
+        
+        # Сообщение для пользователя
+        if is_latex_error:
+            # Для ошибок компиляции LaTeX - дружелюбное сообщение
+            user_message = (
+                "⚠️ Произошла ошибка при компиляции документа.\n\n"
+                "Администратор бота уже уведомлен и скоро пришлет вам работу."
+            )
+        else:
+            # Для других ошибок - общее сообщение
+            user_message = (
+                "❌ Произошла ошибка во время генерации.\n\n"
+                "Администратор бота уже уведомлен и скоро пришлет вам работу."
+            )
         
         # Полная ошибка в логи
         print(f"Error in generate_work_async: {e}")
+        if is_latex_error:
+            print(f"LaTeX compilation error details: {e.error_details}")
         
         try:
             await bot.edit_message_text(
@@ -151,12 +172,12 @@ async def generate_work_async(
                 chat_id=chat_id,
                 message_id=message_id_to_edit
             )
-            await bot.send_message(chat_id, error_message)
+            await bot.send_message(chat_id, user_message)
         except Exception as send_error:
             print(f"Failed to send error message: {send_error}")
             # Если и короткое сообщение не отправляется, отправляем минимальное
             try:
-                await bot.send_message(chat_id, "❌ Произошла ошибка во время генерации. Попробуйте еще раз.")
+                await bot.send_message(chat_id, "⚠️ Произошла ошибка. Администратор бота уже уведомлен и скоро пришлет вам работу.")
             except:
                 pass
     

@@ -59,10 +59,17 @@ async def compile_latex_to_pdf(tex_content: str, output_dir: str, filename: str)
         if process2.returncode == 0 and os.path.exists(pdf_file):
             return True, pdf_file
         else:
-            error_msg = f"LaTeX compilation failed on second pass. Return code: {process2.returncode}\n"
-            error_msg += f"First pass stdout: {stdout1.decode('utf-8', errors='ignore')[:500]}...\n"
-            error_msg += f"Second pass stdout: {stdout2.decode('utf-8', errors='ignore')[:500]}...\n"
-            error_msg += f"Second pass stderr: {stderr2.decode('utf-8', errors='ignore')[:500]}..."
+            # Собираем полный текст ошибки без обрезки
+            stdout1_text = stdout1.decode('utf-8', errors='ignore')
+            stdout2_text = stdout2.decode('utf-8', errors='ignore')
+            stderr1_text = stderr1.decode('utf-8', errors='ignore')
+            stderr2_text = stderr2.decode('utf-8', errors='ignore')
+            
+            error_msg = f"LaTeX compilation failed on second pass. Return code: {process2.returncode}\n\n"
+            error_msg += f"=== First pass stdout ===\n{stdout1_text}\n\n"
+            error_msg += f"=== First pass stderr ===\n{stderr1_text}\n\n"
+            error_msg += f"=== Second pass stdout ===\n{stdout2_text}\n\n"
+            error_msg += f"=== Second pass stderr ===\n{stderr2_text}"
             return False, error_msg
             
     except Exception as e:
