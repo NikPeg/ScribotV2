@@ -54,6 +54,7 @@ LATEX_TEMPLATE = r"""
 \end{{titlepage}}
 
 \tableofcontents
+\clearpage
 
 {content}
 
