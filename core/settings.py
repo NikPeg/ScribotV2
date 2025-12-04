@@ -37,6 +37,5 @@ class Settings(BaseSettings):
         env_file_encoding='utf-8'
     )
     llm_token: str
-    model: str
 
 settings = Settings()

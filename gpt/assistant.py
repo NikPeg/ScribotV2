@@ -54,21 +54,18 @@ def clear_conversation(order_id: int) -> None:
         del conversation_history[order_id]
 
 
-async def ask_assistant(order_id: int, prompt: str, model_name: str = None) -> str:
+async def ask_assistant(order_id: int, prompt: str, model_name: str) -> str:
     """
     Отправляет промпт в модель через OpenRouter API и возвращает ответ.
     
     Args:
         order_id: ID заказа (для сохранения истории)
         prompt: Текст запроса
-        model_name: Название модели (если не указано, используется из настроек)
+        model_name: Название модели (обязательный параметр)
     
     Returns:
         Ответ модели
     """
-    # Используем модель из настроек, если не указана явно
-    if model_name is None:
-        model_name = settings.model
     
     # Убеждаемся, что история существует
     if order_id not in conversation_history:
