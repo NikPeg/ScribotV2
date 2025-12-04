@@ -22,6 +22,11 @@ LATEX_TEMPLATE = r"""
 \geometry{{left=3cm,right=1.5cm,top=2cm,bottom=2cm}}
 \onehalfspacing
 \setlength{{\parindent}}{{1.25cm}}
+% Улучшение переноса строк для предотвращения overfull hbox
+\emergencystretch=3em
+\tolerance=1000
+\hfuzz=0.5pt
+\sloppy
 
 \begin{{document}}
 
@@ -231,6 +236,68 @@ def create_latex_document(theme: str, content: str) -> str:
     return LATEX_TEMPLATE.format(theme=theme, content=content)
 
 
+def improve_hyphenation(content: str) -> str:
+    """
+    Улучшает перенос слов в LaTeX для предотвращения overfull hbox.
+    
+    Заменяет / на \slash для улучшения переноса в местах типа "слово/слово".
+    Добавляет точки переноса для очень длинных слов.
+    
+    Args:
+        content: Исходный LaTeX контент
+    
+    Returns:
+        Контент с улучшенными переносами
+    """
+    # Применяем улучшения переноса только к обычному тексту
+    # Не трогаем LaTeX команды, URL и уже обработанные места
+    lines = content.split('\n')
+    improved_lines = []
+    
+    for line in lines:
+        # Пропускаем строки с LaTeX командами
+        if line.strip().startswith('\\') and any(cmd in line for cmd in ['section', 'subsection', 'begin', 'end', 'item', 'textbf', 'textit', 'slash']):
+            improved_lines.append(line)
+            continue
+        
+        # Пропускаем строки с URL
+        if 'http' in line.lower() or 'www' in line.lower():
+            improved_lines.append(line)
+            continue
+        
+        # Улучшаем переносы в обычном тексте
+        improved_line = line
+        
+        # Заменяем / на \slash\hspace{0pt} в контексте "слово/слово" или "слово / слово"
+        # Используем более точный паттерн: буквенно-цифровые последовательности вокруг /
+        improved_line = re.sub(
+            r'\b([a-zA-Zа-яА-ЯёЁ]+)\s*/\s*([a-zA-Zа-яА-ЯёЁ]+)\b',
+            r'\1\\slash\\hspace{0pt}\2',
+            improved_line
+        )
+        
+        # Добавляем \hspace{0pt} после пробелов перед длинными словами
+        # Это позволяет TeX переносить строку перед длинным словом, если оно не помещается
+        def add_break_before_long_word(match):
+            space = match.group(1)
+            word = match.group(2)
+            # Добавляем точку переноса только перед очень длинными словами (более 10 символов)
+            if len(word) > 10 and '\\' not in word:
+                return space + '\\hspace{0pt}' + word
+            return match.group(0)
+        
+        # Ищем пробелы перед длинными словами
+        improved_line = re.sub(
+            r'(\s+)([a-zA-Zа-яА-ЯёЁ]{11,})\b',
+            add_break_before_long_word,
+            improved_line
+        )
+        
+        improved_lines.append(improved_line)
+    
+    return '\n'.join(improved_lines)
+
+
 def clean_latex_content(content: str) -> str:
     """
     Очищает LaTeX контент от потенциально проблемных элементов.
@@ -243,6 +310,9 @@ def clean_latex_content(content: str) -> str:
     """
     # Убираем markdown блоки кода (```latex в начале и ``` в конце)
     content = remove_markdown_code_blocks(content)
+    
+    # 0. Улучшаем переносы для предотвращения overfull hbox
+    content = improve_hyphenation(content)
     
     # 1. Умное экранирование $ (только не-математические)
     content = smart_escape_dollars(content)
