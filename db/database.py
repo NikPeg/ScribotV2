@@ -1,8 +1,11 @@
 # db/database.py
 import aiosqlite
+import os
 from datetime import datetime
 
-DB_NAME = 'scribot.db'
+# Путь к базе данных: используем переменную окружения или дефолтный путь
+DB_DIR = os.getenv('DB_DIR', '.')
+DB_NAME = os.path.join(DB_DIR, 'scribot.db')
 
 async def init_db():
     """Инициализирует базу данных и создает таблицу, если её нет."""

@@ -1,0 +1,18 @@
+services:
+  bot:
+    build: .
+    container_name: scribot_bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Указываем путь к директории с базой данных
+      - DB_DIR=/app/data
+    volumes:
+      # Монтируем директорию с базой данных, чтобы она сохранялась между запусками
+      - ./data:/app/data
+    working_dir: /app
+    # Убеждаемся, что контейнер не завершается при ошибках
+    stdin_open: true
+    tty: true
+
