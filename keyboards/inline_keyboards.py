@@ -82,8 +82,8 @@ def get_model_keyboard():
     builder = InlineKeyboardBuilder()
 
     buttons = [
-        InlineKeyboardButton(text="GPT-3.5 Turbo", callback_data="model:gpt-3.5-turbo"),
-        InlineKeyboardButton(text="GPT-4o mini (x2 цена)", callback_data="model:gpt-4o-mini"),
+        InlineKeyboardButton(text="GPT-3.5 Turbo", callback_data="model:openai/gpt-3.5-turbo"),
+        InlineKeyboardButton(text="GPT-4o mini (x2 цена)", callback_data="model:openai/gpt-4o-mini"),
         InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_type"),
     ]
 

@@ -14,6 +14,7 @@ from core.latex_template import create_latex_document
 from core.document_converter import compile_latex_to_pdf, convert_tex_to_docx
 from core.file_sender import send_tex_file_to_admin, send_generated_files_to_user, send_error_log_to_admin
 from core.page_calculator import count_pages_in_text
+from gpt.assistant import clear_conversation
 
 # Для "прогресс-бара"
 READY_SYMBOL = "🟦"
@@ -22,7 +23,6 @@ UNREADY_SYMBOL = "⬜️"
 
 async def generate_work_async(
         order_id: int,
-        thread_id: str,
         model_name: str,
         bot: Bot,
         chat_id: int,
@@ -34,7 +34,6 @@ async def generate_work_async(
     
     Args:
         order_id: ID заказа в базе данных
-        thread_id: ID потока OpenAI
         model_name: Название модели GPT
         bot: Экземпляр бота Telegram
         chat_id: ID чата пользователя
@@ -55,7 +54,7 @@ async def generate_work_async(
 
         # --- Этап 1: Составление плана ---
         await _update_progress(bot, chat_id, message_id_to_edit, 1, "Составляю план работы...")
-        plan = await generate_work_plan(thread_id, model_name, theme, pages, work_type)
+        plan = await generate_work_plan(order_id, model_name, theme, pages, work_type)
 
         # --- Этап 2: Пошаговая генерация содержания с контролем объема ---
         await _update_progress(bot, chat_id, message_id_to_edit, 2, "Генерирую содержание по главам...")
@@ -67,7 +66,7 @@ async def generate_work_async(
             await _update_progress_detailed(bot, chat_id, message_id_to_edit, stage_progress, description)
         
         content = await generate_work_content_stepwise(
-            thread_id, model_name, theme, pages, work_type, plan, content_progress_callback
+            order_id, model_name, theme, pages, work_type, plan, content_progress_callback
         )
         
         # Подсчитываем фактическое количество страниц
@@ -162,6 +161,9 @@ async def generate_work_async(
                 pass
     
     finally:
+        # Очищаем историю беседы для заказа
+        clear_conversation(order_id)
+        
         # Очищаем временные файлы
         if temp_dir and os.path.exists(temp_dir):
             try:

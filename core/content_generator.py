@@ -13,12 +13,12 @@ from core.page_calculator import (
 )
 
 
-async def generate_work_plan(thread_id: str, model_name: str, theme: str, pages: int, work_type: str) -> str:
+async def generate_work_plan(order_id: int, model_name: str, theme: str, pages: int, work_type: str) -> str:
     """
-    Генерирует план работы через GPT.
+    Генерирует план работы через OpenRouter API.
     
     Args:
-        thread_id: ID потока OpenAI
+        order_id: ID заказа
         model_name: Название модели GPT
         theme: Тема работы
         pages: Количество страниц
@@ -45,11 +45,11 @@ async def generate_work_plan(thread_id: str, model_name: str, theme: str, pages:
         f"И так далее..."
     )
     
-    return await ask_assistant(thread_id, plan_prompt, model_name)
+    return await ask_assistant(order_id, plan_prompt, model_name)
 
 
 async def generate_work_content_stepwise(
-    thread_id: str, 
+    order_id: int, 
     model_name: str, 
     theme: str, 
     pages: int, 
@@ -61,7 +61,7 @@ async def generate_work_content_stepwise(
     Генерирует содержание работы пошагово с контролем объема.
     
     Args:
-        thread_id: ID потока OpenAI
+        order_id: ID заказа
         model_name: Название модели GPT
         theme: Тема работы
         pages: Количество страниц
@@ -76,7 +76,7 @@ async def generate_work_content_stepwise(
     chapters = parse_work_plan(plan_text)
     if not chapters:
         # Fallback к старому методу если план не распарсился
-        return await generate_full_work_content_legacy(thread_id, model_name, theme, pages, work_type)
+        return await generate_full_work_content_legacy(order_id, model_name, theme, pages, work_type)
     
     # Разделяем главы на основные и список источников
     main_chapters = []
@@ -105,7 +105,7 @@ async def generate_work_content_stepwise(
         
         # Генерируем основное содержание главы
         chapter_content = await generate_chapter_content(
-            thread_id, model_name, chapter_title, theme, target_pages, work_type
+            order_id, model_name, chapter_title, theme, target_pages, work_type
         )
         
         current_chapter_pages = count_pages_in_text(chapter_content)
@@ -114,7 +114,7 @@ async def generate_work_content_stepwise(
         # Если страниц недостаточно, генерируем подразделы
         if should_generate_subsections(current_chapter_pages, target_pages):
             subsections_content = await generate_subsections_content(
-                thread_id, model_name, chapter_title, chapter['subsections'],
+                order_id, model_name, chapter_title, chapter['subsections'],
                 target_pages - current_chapter_pages, theme
             )
             chapter_content += "\n\n" + subsections_content
@@ -134,7 +134,7 @@ async def generate_work_content_stepwise(
             await progress_callback("Генерирую список источников...", 95)
         
         bibliography_content = await generate_chapter_content(
-            thread_id, model_name, bibliography_chapter['title'], theme, 0.5, work_type
+            order_id, model_name, bibliography_chapter['title'], theme, 0.5, work_type
         )
         full_content += bibliography_content
     else:
@@ -143,7 +143,7 @@ async def generate_work_content_stepwise(
             await progress_callback("Генерирую список источников...", 95)
         
         bibliography_content = await generate_chapter_content(
-            thread_id, model_name, "Список использованных источников", theme, 0.5, work_type
+            order_id, model_name, "Список использованных источников", theme, 0.5, work_type
         )
         full_content += bibliography_content
     
@@ -151,7 +151,7 @@ async def generate_work_content_stepwise(
 
 
 async def generate_chapter_content(
-    thread_id: str, 
+    order_id: int, 
     model_name: str, 
     chapter_title: str, 
     theme: str, 
@@ -162,7 +162,7 @@ async def generate_chapter_content(
     Генерирует содержание одной главы.
     
     Args:
-        thread_id: ID потока OpenAI
+        order_id: ID заказа
         model_name: Название модели GPT
         chapter_title: Название главы
         theme: Тема работы
@@ -238,11 +238,11 @@ async def generate_chapter_content(
 Можешь включить формулы, таблицы или рисунки где уместно.
 """
     
-    return await ask_assistant(thread_id, prompt, model_name)
+    return await ask_assistant(order_id, prompt, model_name)
 
 
 async def generate_subsections_content(
-    thread_id: str, 
+    order_id: int, 
     model_name: str, 
     chapter_title: str, 
     subsections: List[str], 
@@ -253,7 +253,7 @@ async def generate_subsections_content(
     Генерирует содержание подразделов для увеличения объема главы.
     
     Args:
-        thread_id: ID потока OpenAI
+        order_id: ID заказа
         model_name: Название модели GPT
         chapter_title: Название главы
         subsections: Список подразделов
@@ -269,7 +269,7 @@ async def generate_subsections_content(
 Предложи 2-3 подраздела для главы "{chapter_title}" в работе на тему "{theme}".
 Ответь только названиями подразделов, каждый с новой строки, без нумерации.
 """
-        subsections_text = await ask_assistant(thread_id, subsections_prompt, model_name)
+        subsections_text = await ask_assistant(order_id, subsections_prompt, model_name)
         subsections = [s.strip() for s in subsections_text.split('\n') if s.strip()]
     
     if not subsections:
@@ -295,7 +295,7 @@ async def generate_subsections_content(
 Начни с команды \\subsection{{{subsection}}} и продолжи содержанием.
 """
         
-        subsection_content = await ask_assistant(thread_id, subsection_prompt, model_name)
+        subsection_content = await ask_assistant(order_id, subsection_prompt, model_name)
         
         # Дополнительная проверка и исправление: заменяем \section на \subsection если GPT ошибся
         subsection_content = fix_section_commands(subsection_content, subsection)
@@ -305,12 +305,12 @@ async def generate_subsections_content(
     return subsections_content.strip()
 
 
-async def generate_full_work_content_legacy(thread_id: str, model_name: str, theme: str, pages: int, work_type: str) -> str:
+async def generate_full_work_content_legacy(order_id: int, model_name: str, theme: str, pages: int, work_type: str) -> str:
     """
     Старый метод генерации полного содержания (fallback).
     
     Args:
-        thread_id: ID потока OpenAI
+        order_id: ID заказа
         model_name: Название модели GPT
         theme: Тема работы
         pages: Количество страниц
@@ -340,7 +340,7 @@ async def generate_full_work_content_legacy(thread_id: str, model_name: str, the
 Начни прямо с введения:
 """
     
-    return await ask_assistant(thread_id, full_work_prompt, model_name)
+    return await ask_assistant(order_id, full_work_prompt, model_name)
 
 
 def fix_section_commands(content: str, expected_subsection_title: str) -> str:

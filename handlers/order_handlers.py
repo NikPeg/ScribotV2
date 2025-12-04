@@ -1,24 +1,15 @@
-from aiogram import F, Router
+from aiogram import F, Router, Bot
 from aiogram.fsm.context import FSMContext
 from aiogram.filters import StateFilter
 from aiogram.types import Message, CallbackQuery
 from utils.admin_logger import send_admin_log
 import html
-from core import OrderStates
-from aiogram import Bot
-from keyboards import get_pages_keyboard, get_work_type_keyboard, get_model_keyboard, get_back_to_menu_keyboard
 import asyncio
-import html
-from aiogram import Bot, F, Router
-from aiogram.filters import StateFilter
-from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery
-
 from core import OrderStates
-from db.database import create_order, update_order_thread_id
-from gpt.assistant import create_thread, ask_assistant
+from keyboards import get_pages_keyboard, get_work_type_keyboard, get_model_keyboard, get_back_to_menu_keyboard
+from db.database import create_order
+from gpt.assistant import init_conversation
 from core.work_generator import generate_work_async
-from utils.admin_logger import send_admin_log
 
 order_router = Router()
 
@@ -129,23 +120,18 @@ async def handle_model(callback: CallbackQuery, state: FSMContext, bot: Bot):
         theme=user_data.get('theme'),
         pages=int(user_data.get('pages')),
         work_type=user_data.get('work_type'),
-        gpt_model=user_data.get('model')
+        gpt_model=model
     )
 
-    # 2. Создаем поток OpenAI
-    thread_id = await create_thread()
-    await update_order_thread_id(order_id, thread_id)
+    # 2. Инициализируем беседу для заказа
+    init_conversation(order_id, user_data.get('theme'))
 
-    # 3. Отправляем первый промпт с темой работы в поток
-    await ask_assistant(thread_id, f"Тема моей работы: «{user_data.get('theme')}». Запомни её.", model)
-
-    # 4. Запускаем генерацию в фоновой задаче, чтобы не блокировать бота
+    # 3. Запускаем генерацию в фоновой задаче, чтобы не блокировать бота
     asyncio.create_task(
         generate_work_async(
             order_id=order_id,
-            thread_id=thread_id,
             model_name=model,
-            bot=bot, # <<< ИСПРАВЛЕНИЕ 2: Используем явно переданный объект `bot`
+            bot=bot,
             chat_id=callback.from_user.id,
             message_id_to_edit=progress_message.message_id
         )
