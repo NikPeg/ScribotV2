@@ -14,6 +14,7 @@ build/
 *.sqlite
 *.sqlite3
 data/
+logs/
 .git/
 .gitignore
 .vscode/

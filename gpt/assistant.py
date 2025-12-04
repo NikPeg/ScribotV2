@@ -1,7 +1,9 @@
 import asyncio
+import time
 from openai import AsyncOpenAI
 from typing import List, Dict
 from core import settings
+from utils.llm_logger import log_llm_request
 
 # Инициализируем клиента OpenRouter
 client = AsyncOpenAI(
@@ -83,6 +85,10 @@ async def ask_assistant(order_id: int, prompt: str, model_name: str) -> str:
         "content": prompt
     })
     
+    start_time = time.time()
+    error = None
+    assistant_message = None
+    
     try:
         # Отправляем запрос в OpenRouter
         response = await client.chat.completions.create(
@@ -101,10 +107,26 @@ async def ask_assistant(order_id: int, prompt: str, model_name: str) -> str:
                 "content": assistant_message
             })
             
-            return assistant_message
         else:
-            return "Произошла ошибка при генерации ответа: пустой ответ от модели."
+            error = "Пустой ответ от модели"
+            assistant_message = "Произошла ошибка при генерации ответа: пустой ответ от модели."
             
     except Exception as e:
+        error = str(e)
+        assistant_message = f"Произошла ошибка при генерации ответа: {str(e)}"
         print(f"Ошибка при запросе к OpenRouter API: {e}")
-        return f"Произошла ошибка при генерации ответа: {str(e)}"
+    
+    finally:
+        # Логируем запрос и ответ
+        duration_ms = (time.time() - start_time) * 1000
+        log_llm_request(
+            order_id=order_id,
+            model_name=model_name,
+            prompt=prompt,
+            response=assistant_message,
+            error=error,
+            duration_ms=duration_ms,
+            conversation_history=conversation_history.get(order_id)
+        )
+    
+    return assistant_message
