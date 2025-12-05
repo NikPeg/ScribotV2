@@ -40,6 +40,7 @@ LATEX_TEMPLATE = r"""
 % появления пустой страницы между титульным листом и содержанием.
 % Окружение titlepage автоматически создает новую страницу после себя,
 % что приводит к появлению лишней пустой страницы.
+\thispagestyle{empty}
 \begin{center}
 \vspace*{2cm}
 {\Large\textbf{МИНИСТЕРСТВО ОБРАЗОВАНИЯ И НАУКИ РФ}}\\[0.5cm]
@@ -63,13 +64,7 @@ LATEX_TEMPLATE = r"""
 Петров П.П.
 \end{flushright}
 
-\vspace*{\fill}
-
-Москва \the\year{}
-
 \end{center}
-
-\newpage
 $tableofcontents
 $content
 
@@ -241,7 +236,7 @@ def create_latex_document(theme: str, content: str, include_toc: bool = True) ->
     content = fix_bibliography_ampersands(content)
     
     # Формируем оглавление в зависимости от параметра
-    tableofcontents = "\\tableofcontents\n\n\\newpage" if include_toc else ""
+    tableofcontents = "\\newpage\n\\tableofcontents\n\n\\newpage" if include_toc else ""
     
     # Используем Template для безопасной подстановки, чтобы избежать конфликтов
     # с фигурными скобками в LaTeX командах
