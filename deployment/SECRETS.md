@@ -202,6 +202,44 @@ ssh: handshake failed: ssh: unable to authenticate, attempted methods [none publ
    ssh -i <path-to-private-key> <user>@<vm-ip> "echo 'Success'"
    ```
 
+### Ошибка прав доступа к Docker
+
+**Симптомы:**
+```
+permission denied while trying to connect to the Docker daemon socket at unix:///var/run/docker.sock
+```
+
+**Причины и решения:**
+
+1. **Пользователь не в группе `docker`**
+   - Добавьте пользователя в группу docker:
+     ```bash
+     yc compute ssh --id <instance-id> "sudo usermod -aG docker ubuntu"
+     ```
+   - **Важно:** Изменения в группах применяются только после перелогина. В GitHub Actions используется `sudo docker` для обхода этой проблемы.
+
+2. **Настройка sudo без пароля для docker команд**
+   - Для работы GitHub Actions необходимо настроить sudo без пароля для команд docker:
+     ```bash
+     yc compute ssh --id <instance-id> "echo 'ubuntu ALL=(ALL) NOPASSWD: /usr/bin/docker, /usr/bin/docker-compose' | sudo tee /etc/sudoers.d/docker-ubuntu"
+     ```
+   - Это позволяет пользователю `ubuntu` выполнять команды docker через sudo без ввода пароля.
+
+3. **Проверка прав на Docker socket**
+   - Убедитесь, что `/var/run/docker.sock` имеет правильные права:
+     ```bash
+     yc compute ssh --id <instance-id> "ls -la /var/run/docker.sock"
+     ```
+   - Должно быть: `srw-rw---- 1 root docker`
+
+4. **Проверка работы docker через sudo**
+   ```bash
+   yc compute ssh --id <instance-id> "sudo -u ubuntu sudo -n docker ps"
+   ```
+   - Команда должна выполниться без ошибок
+
+**Примечание:** В workflow файле все команды `docker` используют `sudo docker`, что гарантирует работу даже если пользователь не перелогинился после добавления в группу docker.
+
 ### Проверка логов GitHub Actions
 
 Если деплой не работает:
