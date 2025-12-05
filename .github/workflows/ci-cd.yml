@@ -111,19 +111,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: Setup SSH key
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H ${{ secrets.YC_INSTANCE_IP }} >> ~/.ssh/known_hosts
-      
       - name: Copy docker-compose.prod.yml to server
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.YC_INSTANCE_IP }}
           username: ${{ secrets.YC_INSTANCE_USER }}
-          key_path: ~/.ssh/deploy_key
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
           source: "deployment/docker-compose.prod.yml"
           target: "~/scribot-bot/"
       
@@ -144,7 +137,7 @@ jobs:
         with:
           host: ${{ secrets.YC_INSTANCE_IP }}
           username: ${{ secrets.YC_INSTANCE_USER }}
-          key_path: ~/.ssh/deploy_key
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
           envs: BOT_TOKEN,CHAT_URL,FEEDBACK_URL,SOS_URL,ADMIN_ID,LOG_LEVEL,REQUIRED_CHANNELS,LLM_TOKEN,YC_REGISTRY_ID,NEW_IMAGE,BACKUP_IMAGE
           script: |
             set -e  # Остановка при ошибке
@@ -432,7 +425,7 @@ jobs:
         with:
           host: ${{ secrets.YC_INSTANCE_IP }}
           username: ${{ secrets.YC_INSTANCE_USER }}
-          key_path: ~/.ssh/deploy_key
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             echo "🔍 Финальная проверка..."
             if docker ps --filter name=scribot_bot --filter status=running | grep -q scribot_bot; then
@@ -450,4 +443,5 @@ jobs:
               docker logs scribot_bot --tail=50 2>&1 || echo "Логи недоступны"
               exit 1
             fi
+
 
