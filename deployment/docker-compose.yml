@@ -3,6 +3,7 @@ services:
     build:
       context: ..
       dockerfile: deployment/Dockerfile
+    image: scribot:latest
     container_name: scribot_bot
     restart: unless-stopped
     environment:
