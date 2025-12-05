@@ -44,13 +44,73 @@ IP адрес виртуальной машины в Yandex Cloud, куда бу
 1. Если используете существующий ключ - скопируйте приватную часть
 2. Если создаете новый:
    ```bash
+   ssh-keygen -t ed25519 -C "github-actions"
+   # или для RSA:
    ssh-keygen -t rsa -b 4096 -C "github-actions"
    ```
 3. Добавьте публичный ключ на VM:
    ```bash
-   ssh-copy-id -i ~/.ssh/id_rsa.pub user@your-vm-ip
+   ssh-copy-id -i ~/.ssh/id_ed25519.pub user@your-vm-ip
    ```
-4. Скопируйте приватный ключ (содержимое `~/.ssh/id_rsa`) и добавьте как секрет
+4. Скопируйте приватный ключ (содержимое `~/.ssh/id_ed25519` или `~/.ssh/id_rsa`) и добавьте как секрет
+
+**⚠️ КРИТИЧЕСКИ ВАЖНО: Проблема с пользователями и authorized_keys**
+
+GitHub Actions подключается к серверу как пользователь, указанный в секрете `YC_INSTANCE_USER` (обычно `ubuntu`). 
+**Публичный ключ должен быть добавлен именно для этого пользователя!**
+
+**Частая ошибка:**
+- Публичный ключ добавлен для другого пользователя (например, `nikpeganov`)
+- GitHub Actions пытается подключиться как `ubuntu`
+- Результат: `ssh: unable to authenticate, attempted methods [none publickey]`
+
+**Правильная настройка:**
+
+1. Убедитесь, что пользователь из `YC_INSTANCE_USER` существует на сервере:
+   ```bash
+   yc compute ssh --id <instance-id> "sudo id ubuntu"
+   ```
+
+2. Проверьте, что у этого пользователя есть файл `authorized_keys`:
+   ```bash
+   yc compute ssh --id <instance-id> "sudo ls -la /home/ubuntu/.ssh/authorized_keys"
+   ```
+
+3. Добавьте публичный ключ для правильного пользователя:
+   ```bash
+   # Извлеките публичный ключ из приватного:
+   ssh-keygen -y -f ~/.ssh/id_ed25519 > /tmp/public_key.pub
+   
+   # Добавьте его на сервер для пользователя ubuntu:
+   yc compute ssh --id <instance-id> "echo '$(cat /tmp/public_key.pub)' | sudo tee -a /home/ubuntu/.ssh/authorized_keys"
+   
+   # Установите правильные права:
+   yc compute ssh --id <instance-id> "sudo chmod 600 /home/ubuntu/.ssh/authorized_keys && sudo chown ubuntu:ubuntu /home/ubuntu/.ssh/authorized_keys"
+   ```
+
+4. Проверьте подключение:
+   ```bash
+   ssh -i ~/.ssh/id_ed25519 ubuntu@<vm-ip> "echo 'Connection successful!'"
+   ```
+
+**Формат ключа в GitHub Secrets:**
+
+При добавлении приватного ключа в GitHub Secrets убедитесь, что:
+- Ключ начинается с `-----BEGIN OPENSSH PRIVATE KEY-----` или `-----BEGIN RSA PRIVATE KEY-----`
+- Ключ заканчивается на `-----END OPENSSH PRIVATE KEY-----` или `-----END RSA PRIVATE KEY-----`
+- Все строки между BEGIN и END включены (ключ не обрезан)
+- Переносы строк сохранены
+- Нет лишних пробелов в начале/конце
+
+**Пример правильного формата:**
+```
+-----BEGIN OPENSSH PRIVATE KEY-----
+b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW
+QyNTUxOQAAACBhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFh
+YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFh
+...
+-----END OPENSSH PRIVATE KEY-----
+```
 
 ## Секреты приложения
 
@@ -107,4 +167,46 @@ Telegram ID администратора (число)
 - Подключаться к базе данных без входа в контейнер
 - Просматривать логи напрямую на сервере
 - Сохранять данные при пересоздании контейнера
+
+## Troubleshooting
+
+### Ошибка SSH аутентификации
+
+**Симптомы:**
+```
+ssh: handshake failed: ssh: unable to authenticate, attempted methods [none publickey], no supported methods remain
+```
+
+**Причины и решения:**
+
+1. **Публичный ключ не добавлен для пользователя из `YC_INSTANCE_USER`**
+   - Проверьте, что публичный ключ добавлен именно для того пользователя, который указан в секрете `YC_INSTANCE_USER`
+   - См. раздел выше "⚠️ КРИТИЧЕСКИ ВАЖНО: Проблема с пользователями и authorized_keys"
+
+2. **Неправильный формат ключа в GitHub Secrets**
+   - Убедитесь, что ключ полный (не обрезан)
+   - Проверьте, что все строки между BEGIN и END включены
+   - Убедитесь, что переносы строк сохранены
+
+3. **Неправильные права доступа на сервере**
+   - Файл `authorized_keys` должен иметь права `600`
+   - Директория `.ssh` должна иметь права `700`
+   - Владелец файлов должен быть правильный пользователь
+
+4. **Проверка подключения вручную:**
+   ```bash
+   # Извлеките публичный ключ из приватного
+   ssh-keygen -y -f <path-to-private-key> > public_key.pub
+   
+   # Попробуйте подключиться
+   ssh -i <path-to-private-key> <user>@<vm-ip> "echo 'Success'"
+   ```
+
+### Проверка логов GitHub Actions
+
+Если деплой не работает:
+1. Перейдите в GitHub → Actions → выберите последний workflow
+2. Проверьте логи шага "Copy docker-compose.prod.yml to server"
+3. Проверьте логи шага "Deploy to server via SSH"
+4. Ошибки обычно указывают на конкретную проблему
 
