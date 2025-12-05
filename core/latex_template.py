@@ -67,11 +67,7 @@ LATEX_TEMPLATE = r"""
 \end{center}
 
 \newpage
-
-\tableofcontents
-
-\newpage
-
+$tableofcontents
 $content
 
 \end{document}
@@ -226,13 +222,14 @@ def remove_markdown_code_blocks(content: str) -> str:
     
     return content.strip()
 
-def create_latex_document(theme: str, content: str) -> str:
+def create_latex_document(theme: str, content: str, include_toc: bool = True) -> str:
     """
     Создает полный LaTeX документ из шаблона и содержания.
     
     Args:
         theme: Тема работы
         content: Содержание работы (без преамбулы)
+        include_toc: Включать ли оглавление (по умолчанию True)
     
     Returns:
         Полный LaTeX документ
@@ -243,10 +240,16 @@ def create_latex_document(theme: str, content: str) -> str:
     # Исправляем символы & в списке литературы
     content = fix_bibliography_ampersands(content)
     
+    # Формируем оглавление в зависимости от параметра
+    if include_toc:
+        tableofcontents = "\\tableofcontents\n\n\\newpage"
+    else:
+        tableofcontents = ""
+    
     # Используем Template для безопасной подстановки, чтобы избежать конфликтов
     # с фигурными скобками в LaTeX командах
     template = Template(LATEX_TEMPLATE)
-    return template.substitute(theme=theme, content=content)
+    return template.substitute(theme=theme, content=content, tableofcontents=tableofcontents)
 
 
 def improve_hyphenation(content: str) -> str:

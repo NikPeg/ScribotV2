@@ -59,38 +59,56 @@ async def generate_work_async(
         pages = order_info['pages']
         work_type = order_info['work_type']
 
-        # --- Этап 1: Составление плана ---
-        await _update_progress(bot, chat_id, message_id_to_edit, 1, "Составляю план работы...")
-        plan = await generate_work_plan(order_id, model_name, theme, pages, work_type)
+        # Для работ 1-2 страницы используем упрощенную генерацию без плана и оглавления
+        if pages == 2:
+            total_stages = 5  # Для малых работ: 1-генерация, 2-формирование, 3-компиляция, 4-конвертация, 5-отправка
+            
+            # --- Этап 1: Генерация простой работы ---
+            await _update_progress(bot, chat_id, message_id_to_edit, 1, "Генерирую текст работы...", total_stages)
+            from core.content_generator import generate_simple_work_content
+            content = await generate_simple_work_content(order_id, model_name, theme, work_type)
+            
+            # --- Этап 2: Формирование LaTeX документа (без оглавления) ---
+            await _update_progress(bot, chat_id, message_id_to_edit, 2, "Формирую LaTeX документ...", total_stages)
+            full_tex = create_latex_document(theme, content, include_toc=False)
+            
+            content_pages = count_pages_in_text(content)
+            total_pages = count_total_pages_in_document(content, 0)  # Без глав для малых работ
+            print(f"Generated simple work: {content_pages:.1f} pages of content, {total_pages:.1f} total pages (target: {pages})")
+        else:
+            total_stages = 6  # Для больших работ: 1-план, 2-генерация, 3-формирование, 4-компиляция, 5-конвертация, 6-отправка
+            # --- Этап 1: Составление плана ---
+            await _update_progress(bot, chat_id, message_id_to_edit, 1, "Составляю план работы...", total_stages)
+            plan = await generate_work_plan(order_id, model_name, theme, pages, work_type)
 
-        # --- Этап 2: Пошаговая генерация содержания с контролем объема ---
-        await _update_progress(bot, chat_id, message_id_to_edit, 2, "Генерирую содержание по главам...")
-        
-        # Создаем callback для обновления прогресса генерации
-        async def content_progress_callback(description: str, progress: int):
-            # Прогресс от 2 до 3 этапа (20% - 30%)
-            stage_progress = 2 + (progress / 100)
-            await _update_progress_detailed(bot, chat_id, message_id_to_edit, stage_progress, description)
-        
-        content = await generate_work_content_stepwise(
-            order_id, model_name, theme, pages, work_type, plan, content_progress_callback
-        )
-        
-        # Подсчитываем фактическое количество страниц
-        # Парсим план для определения количества глав
-        try:
-            chapters = parse_work_plan(plan)
-            num_chapters = len(chapters)
-        except Exception:
-            num_chapters = 0
-        
-        content_pages = count_pages_in_text(content)
-        total_pages = count_total_pages_in_document(content, num_chapters)
-        print(f"Generated content: {content_pages:.1f} pages of content, {total_pages:.1f} total pages (target: {pages})")
+            # --- Этап 2: Пошаговая генерация содержания с контролем объема ---
+            await _update_progress(bot, chat_id, message_id_to_edit, 2, "Генерирую содержание по главам...", total_stages)
+            
+            # Создаем callback для обновления прогресса генерации
+            async def content_progress_callback(description: str, progress: int):
+                # Прогресс от 2 до 3 этапа (20% - 30%)
+                stage_progress = 2 + (progress / 100)
+                await _update_progress_detailed(bot, chat_id, message_id_to_edit, stage_progress, description)
+            
+            content = await generate_work_content_stepwise(
+                order_id, model_name, theme, pages, work_type, plan, content_progress_callback
+            )
+            
+            # Подсчитываем фактическое количество страниц
+            # Парсим план для определения количества глав
+            try:
+                chapters = parse_work_plan(plan)
+                num_chapters = len(chapters)
+            except Exception:
+                num_chapters = 0
+            
+            content_pages = count_pages_in_text(content)
+            total_pages = count_total_pages_in_document(content, num_chapters)
+            print(f"Generated content: {content_pages:.1f} pages of content, {total_pages:.1f} total pages (target: {pages})")
 
-        # --- Этап 3: Формирование LaTeX документа ---
-        await _update_progress(bot, chat_id, message_id_to_edit, 3, "Формирую LaTeX документ...")
-        full_tex = create_latex_document(theme, content)
+            # --- Этап 3: Формирование LaTeX документа ---
+            await _update_progress(bot, chat_id, message_id_to_edit, 3, "Формирую LaTeX документ...", total_stages)
+            full_tex = create_latex_document(theme, content, include_toc=True)
         
         # Сохраняем tex в БД
         await save_full_tex(order_id, full_tex)
@@ -107,16 +125,27 @@ async def generate_work_async(
         # Отправляем .tex файл админу для отладки (всегда, до компиляции)
         await send_tex_file_to_admin(bot, order_id, tex_path, theme)
 
-        # --- Этап 4: Компиляция в PDF ---
-        await _update_progress(bot, chat_id, message_id_to_edit, 4, "Компилирую PDF...")
+        # Определяем номер этапа в зависимости от типа работы
+        if pages == 2:
+            # Для малых работ этапы: 1-генерация, 2-формирование, 3-компиляция, 4-конвертация, 5-отправка
+            current_stage = 3
+            total_stages = 5
+        else:
+            # Для больших работ этапы: 1-план, 2-генерация, 3-формирование, 4-компиляция, 5-конвертация, 6-отправка
+            current_stage = 4
+            total_stages = 6
+        
+        # --- Этап 4 (или 3 для малых работ): Компиляция в PDF ---
+        await _update_progress(bot, chat_id, message_id_to_edit, current_stage, "Компилирую PDF...", total_stages)
         success, result = await compile_latex_to_pdf(full_tex, temp_dir, filename)
         if not success:
             raise LaTeXCompilationError(result)
         
         pdf_path = result
 
-        # --- Этап 5: Конвертация в DOCX ---
-        await _update_progress(bot, chat_id, message_id_to_edit, 5, "Конвертирую в DOCX...")
+        # --- Этап 5 (или 4 для малых работ): Конвертация в DOCX ---
+        current_stage += 1
+        await _update_progress(bot, chat_id, message_id_to_edit, current_stage, "Конвертирую в DOCX...", total_stages)
         success, result = await convert_tex_to_docx(full_tex, temp_dir, filename)
         if not success:
             # Если конвертация не удалась, продолжаем без DOCX
@@ -125,8 +154,9 @@ async def generate_work_async(
         else:
             docx_path = result
 
-        # --- Этап 6: Отправка файлов ---
-        await _update_progress(bot, chat_id, message_id_to_edit, 6, "Отправляю результат...")
+        # --- Этап 6 (или 5 для малых работ): Отправка файлов ---
+        current_stage += 1
+        await _update_progress(bot, chat_id, message_id_to_edit, current_stage, "Отправляю результат...", total_stages)
         files_sent = await send_generated_files_to_user(bot, chat_id, pdf_path, docx_path, theme)
 
         # Финальное сообщение
@@ -201,7 +231,7 @@ async def generate_work_async(
                 print(f"Failed to cleanup temp directory: {cleanup_error}")
 
 
-async def _update_progress(bot: Bot, chat_id: int, message_id: int, stage: int, description: str) -> None:
+async def _update_progress(bot: Bot, chat_id: int, message_id: int, stage: int, description: str, total_stages: int = 6) -> None:
     """
     Обновляет прогресс-бар в сообщении.
     
@@ -209,12 +239,17 @@ async def _update_progress(bot: Bot, chat_id: int, message_id: int, stage: int, 
         bot: Экземпляр бота
         chat_id: ID чата
         message_id: ID сообщения для редактирования
-        stage: Номер текущего этапа (1-6)
+        stage: Номер текущего этапа
         description: Описание текущего этапа
+        total_stages: Общее количество этапов (по умолчанию 6)
     """
+    # Вычисляем количество символов прогресса (масштабируем к 10 символам)
+    progress_symbols = int((stage / total_stages) * 10)
+    progress_symbols = min(10, max(0, progress_symbols))
+    
     progress_text = (
-        f"{READY_SYMBOL * stage}{UNREADY_SYMBOL * (10 - stage)}\n"
-        f"🤖 Этап {stage}/6: {description}"
+        f"{READY_SYMBOL * progress_symbols}{UNREADY_SYMBOL * (10 - progress_symbols)}\n"
+        f"🤖 Этап {stage}/{total_stages}: {description}"
     )
     await bot.edit_message_text(text=progress_text, chat_id=chat_id, message_id=message_id)
 
