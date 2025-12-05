@@ -118,7 +118,7 @@ jobs:
           username: ${{ secrets.YC_INSTANCE_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           source: "deployment/docker-compose.prod.yml"
-          target: "~/scribot-bot/"
+          target: "~/ScribotV2/"
       
       - name: Deploy to server via SSH
         uses: appleboy/ssh-action@v1.0.3
@@ -145,7 +145,7 @@ jobs:
             echo "🔄 Начинаем деплой..."
             
             # Создаем директории если их нет
-            export DEPLOY_DIR="$HOME/scribot-bot"
+            export DEPLOY_DIR="$HOME/ScribotV2"
             mkdir -p "$DEPLOY_DIR/data" "$DEPLOY_DIR/logs"
             echo "📁 Директория деплоя: $DEPLOY_DIR"
             
