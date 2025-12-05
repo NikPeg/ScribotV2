@@ -180,60 +180,13 @@ jobs:
             if [ -f "$DEPLOY_DIR/docker-compose.prod.yml" ]; then
               echo "🛑 Останавливаем через docker-compose..."
               cd "$DEPLOY_DIR" || true
-              # Останавливаем и удаляем контейнеры через docker-compose
-              sudo docker-compose -f docker-compose.prod.yml down --remove-orphans 2>/dev/null || true
+              # Останавливаем и удаляем контейнеры через docker-compose (более агрессивно)
+              sudo docker-compose -f docker-compose.prod.yml down --remove-orphans --timeout 10 2>/dev/null || true
               sleep 3
               # Дополнительно проверяем и удаляем, если что-то осталось
               sudo docker-compose -f docker-compose.prod.yml rm -f 2>/dev/null || true
               sleep 2
             fi
-            
-            # Функция для агрессивного убийства всех процессов контейнера
-            kill_container_processes() {
-              local CONTAINER_ID=$1
-              echo "  🔪 Агрессивное убийство всех процессов контейнера $CONTAINER_ID..."
-              
-              # Получаем PID основного процесса контейнера
-              local CONTAINER_PID=$(sudo docker inspect "$CONTAINER_ID" --format '{{.State.Pid}}' 2>/dev/null || echo "")
-              
-              if [ -n "$CONTAINER_PID" ] && [ "$CONTAINER_PID" != "0" ]; then
-                echo "    Основной PID контейнера: $CONTAINER_PID"
-                
-                # Убиваем основной процесс и все его дочерние процессы
-                sudo kill -9 "$CONTAINER_PID" 2>/dev/null || true
-                
-                # Находим и убиваем все дочерние процессы
-                local CHILD_PIDS=$(pgrep -P "$CONTAINER_PID" 2>/dev/null || true)
-                if [ -n "$CHILD_PIDS" ]; then
-                  echo "    Найдены дочерние процессы: $CHILD_PIDS"
-                  for CHILD_PID in $CHILD_PIDS; do
-                    sudo kill -9 "$CHILD_PID" 2>/dev/null || true
-                  done
-                fi
-                
-                # Находим все процессы, связанные с контейнером через cgroup
-                local CGROUP_PIDS=$(sudo find /sys/fs/cgroup -name "*.scope" -path "*$CONTAINER_ID*" -exec cat {}/cgroup.procs \; 2>/dev/null | sort -u || true)
-                if [ -n "$CGROUP_PIDS" ]; then
-                  echo "    Найдены процессы через cgroup: $CGROUP_PIDS"
-                  for CGROUP_PID in $CGROUP_PIDS; do
-                    if [ "$CGROUP_PID" != "0" ] && [ -n "$CGROUP_PID" ]; then
-                      sudo kill -9 "$CGROUP_PID" 2>/dev/null || true
-                    fi
-                  done
-                fi
-              fi
-              
-              # Дополнительно: убиваем все процессы python, связанные с контейнером (если это Python приложение)
-              local PYTHON_PIDS=$(sudo ps aux | grep -E "python.*main.py|scribot" | grep -v grep | awk '{print $2}' || true)
-              if [ -n "$PYTHON_PIDS" ]; then
-                echo "    Найдены процессы Python: $PYTHON_PIDS"
-                for PYTHON_PID in $PYTHON_PIDS; do
-                  sudo kill -9 "$PYTHON_PID" 2>/dev/null || true
-                done
-              fi
-              
-              sleep 2
-            }
             
             # Получаем ID всех контейнеров с именем scribot_bot (включая остановленные)
             CONTAINER_IDS=$(sudo docker ps -a --filter name=scribot_bot --format "{{.ID}}" || true)
@@ -242,43 +195,53 @@ jobs:
               echo "🗑️  Найдены контейнеры для удаления: $CONTAINER_IDS"
               for CONTAINER_ID in $CONTAINER_IDS; do
                 echo "  Останавливаем контейнер $CONTAINER_ID..."
-                # Сначала останавливаем контейнер
-                sudo docker stop "$CONTAINER_ID" 2>/dev/null || true
-                sleep 1
                 
+                # Отключаем автоперезапуск перед остановкой
                 echo "  Отключаем автоперезапуск для $CONTAINER_ID..."
                 sudo docker update --restart=no "$CONTAINER_ID" 2>/dev/null || true
                 
-                # Если контейнер все еще работает, агрессивно убиваем процессы
+                # Пытаемся остановить контейнер с таймаутом
+                echo "  Останавливаем контейнер $CONTAINER_ID..."
+                sudo docker stop --time=10 "$CONTAINER_ID" 2>/dev/null || true
+                sleep 2
+                
+                # Если контейнер все еще работает, используем docker kill (более агрессивно)
                 CONTAINER_STATUS=$(sudo docker inspect "$CONTAINER_ID" --format '{{.State.Status}}' 2>/dev/null || echo "unknown")
                 if [ "$CONTAINER_STATUS" = "running" ]; then
-                  echo "  Контейнер все еще работает, убиваем процессы..."
-                  kill_container_processes "$CONTAINER_ID"
+                  echo "  Контейнер все еще работает, используем docker kill..."
+                  sudo docker kill "$CONTAINER_ID" 2>/dev/null || true
+                  sleep 2
                 fi
                 
+                # Удаляем контейнер
                 echo "  Удаляем контейнер $CONTAINER_ID..."
                 sudo docker rm -f "$CONTAINER_ID" 2>/dev/null || true
+                sleep 1
               done
               sleep 3
             fi
             
-            # Финальная проверка
+            # Финальная проверка и экстренные меры
             if sudo docker ps -a --filter name=scribot_bot --format "{{.Names}}" | grep -q scribot_bot; then
               echo "⚠️  Контейнер все еще существует, применяем экстренные меры..."
               
-              # Последняя попытка - остановить, убить процессы и принудительно удалить
+              # Последняя попытка - используем только docker команды
               REMAINING_IDS=$(sudo docker ps -a --filter name=scribot_bot --format "{{.ID}}")
               for CONTAINER_ID in $REMAINING_IDS; do
                 echo "  Экстренная остановка контейнера $CONTAINER_ID..."
                 
-                # Пытаемся остановить через docker kill (более агрессивно чем stop)
+                # Отключаем автоперезапуск
+                sudo docker update --restart=no "$CONTAINER_ID" 2>/dev/null || true
+                
+                # Используем docker kill (более агрессивно чем stop)
                 sudo docker kill "$CONTAINER_ID" 2>/dev/null || true
-                sudo docker stop "$CONTAINER_ID" 2>/dev/null || true
                 sleep 2
                 
-                # Агрессивно убиваем все процессы контейнера
-                kill_container_processes "$CONTAINER_ID"
+                # Пытаемся остановить еще раз
+                sudo docker stop --time=5 "$CONTAINER_ID" 2>/dev/null || true
+                sleep 2
                 
+                # Принудительное удаление
                 echo "  Принудительное удаление контейнера $CONTAINER_ID..."
                 sudo docker rm -f "$CONTAINER_ID" 2>/dev/null || true
                 sleep 2
@@ -290,26 +253,28 @@ jobs:
                 echo "Информация о контейнере:"
                 sudo docker ps -a --filter name=scribot_bot
                 
-                # Последняя попытка через docker-compose
-                echo "Попытка удалить через docker-compose..."
+                # Последняя попытка через docker-compose с более агрессивными флагами
+                echo "Попытка удалить через docker-compose (финальная)..."
                 cd "$DEPLOY_DIR" || true
-                sudo docker-compose -f docker-compose.prod.yml down --remove-orphans 2>/dev/null || true
+                sudo docker-compose -f docker-compose.prod.yml down --remove-orphans --volumes --timeout 5 2>/dev/null || true
                 sleep 3
                 
-                # Если все еще существует - убиваем все процессы вручную
+                # Еще одна попытка удалить через docker rm
                 FINAL_IDS=$(sudo docker ps -a --filter name=scribot_bot --format "{{.ID}}")
                 for FINAL_ID in $FINAL_IDS; do
-                  echo "  🔪 ФИНАЛЬНАЯ ПОПЫТКА: Убиваем все процессы контейнера $FINAL_ID..."
-                  kill_container_processes "$FINAL_ID"
-                  
-                  # Пытаемся удалить контейнер еще раз
+                  echo "  🔪 ФИНАЛЬНАЯ ПОПЫТКА: Удаляем контейнер $FINAL_ID..."
+                  sudo docker kill "$FINAL_ID" 2>/dev/null || true
+                  sleep 1
                   sudo docker rm -f "$FINAL_ID" 2>/dev/null || true
-                  sleep 2
+                  sleep 1
                 done
                 
                 # Финальная проверка
                 if sudo docker ps -a --filter name=scribot_bot --format "{{.Names}}" | grep -q scribot_bot; then
                   echo "❌ НЕВОЗМОЖНО УДАЛИТЬ КОНТЕЙНЕР! Требуется ручное вмешательство."
+                  echo "Попробуйте на сервере выполнить:"
+                  echo "  sudo docker kill \$(sudo docker ps -a -q --filter name=scribot_bot)"
+                  echo "  sudo docker rm -f \$(sudo docker ps -a -q --filter name=scribot_bot)"
                   exit 1
                 fi
               fi
@@ -326,12 +291,11 @@ jobs:
               if [ -n "$OLD_CONTAINERS" ]; then
                 echo "⚠️  Найдены остатки старых контейнеров, удаляем..."
                 for CID in $OLD_CONTAINERS; do
-                  # Убиваем процесс
-                  OLD_PID=$(sudo docker inspect "$CID" --format '{{.State.Pid}}' 2>/dev/null || echo "")
-                  if [ -n "$OLD_PID" ] && [ "$OLD_PID" != "0" ]; then
-                    echo "  Убиваем PID: $OLD_PID"
-                    sudo kill -9 "$OLD_PID" 2>/dev/null || true
-                  fi
+                  echo "  Останавливаем и удаляем контейнер $CID..."
+                  # Отключаем автоперезапуск
+                  sudo docker update --restart=no "$CID" 2>/dev/null || true
+                  # Используем docker kill для агрессивной остановки
+                  sudo docker kill "$CID" 2>/dev/null || true
                   sleep 1
                   # Удаляем контейнер
                   sudo docker rm -f "$CID" 2>/dev/null || true
@@ -408,13 +372,10 @@ jobs:
               if [ -n "$CURRENT_IMAGE" ]; then
                 echo "🔙 Откатываемся к предыдущей версии из-за проблем с healthcheck"
                 
-                # Получаем PID процесса и убиваем его
-                CONTAINER_PID=$(sudo docker inspect scribot_bot --format '{{.State.Pid}}' 2>/dev/null || echo "")
-                if [ -n "$CONTAINER_PID" ] && [ "$CONTAINER_PID" != "0" ]; then
-                  sudo kill -9 "$CONTAINER_PID" 2>/dev/null || true
-                  sleep 1
-                fi
-                
+                # Останавливаем и удаляем контейнер через docker команды
+                sudo docker update --restart=no scribot_bot 2>/dev/null || true
+                sudo docker kill scribot_bot 2>/dev/null || true
+                sleep 1
                 sudo docker stop scribot_bot 2>/dev/null || true
                 sudo docker rm -f scribot_bot 2>/dev/null || true
                 
@@ -445,13 +406,10 @@ jobs:
                 if [ -n "$CURRENT_IMAGE" ]; then
                   echo "🔙 Откатываемся к предыдущей версии: $CURRENT_IMAGE"
                   
-                  # Получаем PID процесса и убиваем его
-                  CONTAINER_PID=$(sudo docker inspect scribot_bot --format '{{.State.Pid}}' 2>/dev/null || echo "")
-                  if [ -n "$CONTAINER_PID" ] && [ "$CONTAINER_PID" != "0" ]; then
-                    sudo kill -9 "$CONTAINER_PID" 2>/dev/null || true
-                    sleep 1
-                  fi
-                  
+                  # Останавливаем и удаляем контейнер через docker команды
+                  sudo docker update --restart=no scribot_bot 2>/dev/null || true
+                  sudo docker kill scribot_bot 2>/dev/null || true
+                  sleep 1
                   sudo docker stop scribot_bot 2>/dev/null || true
                   sudo docker rm -f scribot_bot 2>/dev/null || true
                   
@@ -482,13 +440,10 @@ jobs:
               if [ -n "$CURRENT_IMAGE" ]; then
                 echo "🔙 Откатываемся к предыдущей версии: $CURRENT_IMAGE"
                 
-                # Получаем PID процесса и убиваем его
-                CONTAINER_PID=$(sudo docker inspect scribot_bot --format '{{.State.Pid}}' 2>/dev/null || echo "")
-                if [ -n "$CONTAINER_PID" ] && [ "$CONTAINER_PID" != "0" ]; then
-                  sudo kill -9 "$CONTAINER_PID" 2>/dev/null || true
-                  sleep 1
-                fi
-                
+                # Останавливаем и удаляем контейнер через docker команды
+                sudo docker update --restart=no scribot_bot 2>/dev/null || true
+                sudo docker kill scribot_bot 2>/dev/null || true
+                sleep 1
                 sudo docker stop scribot_bot 2>/dev/null || true
                 sudo docker rm -f scribot_bot 2>/dev/null || true
                 
