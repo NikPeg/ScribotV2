@@ -4,6 +4,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 from core import settings
 from core.settings import get_required_channels
 
+
 def get_main_menu_keyboard():
     """Возвращает клавиатуру для главного меню."""
     builder = InlineKeyboardBuilder()
@@ -126,13 +127,13 @@ def get_subscription_keyboard():
                 if channel_id < 0:
                     # Супергруппа - используем формат t.me/c/{id_without_minus}
                     builder.button(
-                        text=f"📢 Канал",
+                        text="📢 Канал",
                         url=f"https://t.me/c/{abs(channel_id)}"
                     )
                 else:
                     # Положительный ID - это может быть публичный канал
                     builder.button(
-                        text=f"📢 Канал",
+                        text="📢 Канал",
                         url=f"https://t.me/c/{channel_id}"
                     )
             except ValueError:

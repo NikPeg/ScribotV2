@@ -1,19 +1,25 @@
-from aiogram import F, Router, Bot
-from aiogram.fsm.context import FSMContext
-from aiogram.filters import StateFilter
-from aiogram.types import Message, CallbackQuery
-from utils.admin_logger import send_admin_log
-import html
 import asyncio
+import html
 import logging
+
+from aiogram import Bot, F, Router
+from aiogram.filters import StateFilter
+from aiogram.fsm.context import FSMContext
+from aiogram.types import CallbackQuery, Message
+
 from core import OrderStates
 from core.settings import get_required_channels
-from keyboards import get_pages_keyboard, get_work_type_keyboard, get_model_keyboard, get_back_to_menu_keyboard
-from keyboards.inline_keyboards import get_subscription_keyboard
+from core.work_generator import generate_work_async
 from db.database import create_order
 from gpt.assistant import init_conversation
-from core.work_generator import generate_work_async
+from keyboards import (
+    get_model_keyboard,
+    get_pages_keyboard,
+    get_work_type_keyboard,
+)
+from keyboards.inline_keyboards import get_subscription_keyboard
 from services.subscription_service import is_user_subscribed_to_all
+from utils.admin_logger import send_admin_log
 
 logger = logging.getLogger(__name__)
 
@@ -155,7 +161,8 @@ async def handle_model(callback: CallbackQuery, state: FSMContext, bot: Bot):
     init_conversation(order_id, user_data.get('theme'))
 
     # 3. Запускаем генерацию в фоновой задаче, чтобы не блокировать бота
-    asyncio.create_task(
+    # Сохраняем ссылку на task, чтобы избежать проблем с garbage collection
+    _ = asyncio.create_task(  # noqa: RUF006
         generate_work_async(
             order_id=order_id,
             model_name=model,

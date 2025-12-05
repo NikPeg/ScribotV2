@@ -3,8 +3,6 @@
 """
 
 import re
-from typing import List, Dict, Tuple
-
 
 # Константы для расчета страниц
 # Учитываем, что в LaTeX документе:
@@ -51,8 +49,7 @@ def count_total_pages_in_document(content_text: str, num_chapters: int = 0) -> f
     """
     content_pages = count_pages_in_text(content_text)
     toc_pages = TOC_PAGES_BASE + (num_chapters * TOC_PAGES_PER_CHAPTER)
-    total_pages = TITLE_PAGE_PAGES + toc_pages + content_pages
-    return total_pages
+    return TITLE_PAGE_PAGES + toc_pages + content_pages
 
 
 def calculate_content_pages_for_target(total_target_pages: int, num_chapters: int = 0) -> float:
@@ -69,8 +66,7 @@ def calculate_content_pages_for_target(total_target_pages: int, num_chapters: in
     """
     toc_pages = TOC_PAGES_BASE + (num_chapters * TOC_PAGES_PER_CHAPTER)
     service_pages = TITLE_PAGE_PAGES + toc_pages
-    content_pages = max(1.0, total_target_pages - service_pages)
-    return content_pages
+    return max(1.0, total_target_pages - service_pages)
 
 
 def remove_latex_commands(text: str) -> str:
@@ -97,7 +93,7 @@ def remove_latex_commands(text: str) -> str:
     return text.strip()
 
 
-def parse_work_plan(plan_text: str) -> List[Dict[str, str]]:
+def parse_work_plan(plan_text: str) -> list[dict[str, str]]:
     """
     Парсит план работы и извлекает структуру глав.
     
@@ -186,7 +182,7 @@ def parse_work_plan(plan_text: str) -> List[Dict[str, str]]:
     return chapters
 
 
-def calculate_pages_per_chapter(total_pages: int, chapters: List[Dict]) -> Dict[str, float]:
+def calculate_pages_per_chapter(total_pages: int, chapters: list[dict]) -> dict[str, float]:
     """
     Рассчитывает количество страниц на каждую главу.
     

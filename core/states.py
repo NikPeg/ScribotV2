@@ -1,4 +1,4 @@
-from aiogram.fsm.state import StatesGroup, State
+from aiogram.fsm.state import State, StatesGroup
 
 # Этот файл описывает все состояния (FSM), в которых может находиться пользователь
 # во время взаимодействия с ботом.

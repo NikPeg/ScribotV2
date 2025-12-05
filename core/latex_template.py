@@ -118,9 +118,7 @@ def smart_escape_ampersands(text: str) -> str:
     
     # Теперь экранируем только неэкранированные &
     # Используем negative lookbehind чтобы не трогать уже экранированные
-    text = re.sub(r'(?<!\\)&', r'\\&', text)
-    
-    return text
+    return re.sub(r'(?<!\\)&', r'\\&', text)
 
 
 def smart_escape_dollars(text: str) -> str:
@@ -179,9 +177,8 @@ def smart_escape_dollars(text: str) -> str:
         
         if has_math_chars and not is_just_number:
             return replace_math_with_marker(match)
-        else:
-            # Это не формула, возвращаем как есть (будет экранировано позже)
-            return match.group(0)
+        # Это не формула, возвращаем как есть (будет экранировано позже)
+        return match.group(0)
     
     text = re.sub(r'(?<!\$)\$(?!\$)((?:(?!\$).)*?)\$(?!\$)', replace_inline_math_if_valid, text, flags=re.DOTALL)
     
@@ -241,10 +238,7 @@ def create_latex_document(theme: str, content: str, include_toc: bool = True) ->
     content = fix_bibliography_ampersands(content)
     
     # Формируем оглавление в зависимости от параметра
-    if include_toc:
-        tableofcontents = "\\tableofcontents\n\n\\newpage"
-    else:
-        tableofcontents = ""
+    tableofcontents = "\\tableofcontents\n\n\\newpage" if include_toc else ""
     
     # Используем Template для безопасной подстановки, чтобы избежать конфликтов
     # с фигурными скобками в LaTeX командах
@@ -253,7 +247,7 @@ def create_latex_document(theme: str, content: str, include_toc: bool = True) ->
 
 
 def improve_hyphenation(content: str) -> str:
-    """
+    r"""
     Улучшает перенос слов в LaTeX для предотвращения overfull hbox.
     
     Заменяет / на \slash для улучшения переноса в местах типа "слово/слово".
@@ -373,6 +367,4 @@ def clean_latex_content(content: str) -> str:
     
     # 4. Убираем trailing whitespace
     lines = [line.rstrip() for line in content.split('\n')]
-    content = '\n'.join(lines)
-    
-    return content
+    return '\n'.join(lines)

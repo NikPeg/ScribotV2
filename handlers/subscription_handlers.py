@@ -2,10 +2,11 @@
 Обработчики для проверки подписки на обязательные каналы.
 """
 import logging
-from aiogram import Router, Bot
+
+from aiogram import Bot, Router
 from aiogram.types import CallbackQuery
+
 from services.subscription_service import is_user_subscribed_to_all
-from keyboards.inline_keyboards import get_subscription_keyboard
 from utils.admin_logger import send_admin_log
 
 logger = logging.getLogger(__name__)

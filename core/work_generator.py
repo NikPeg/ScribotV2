@@ -2,19 +2,25 @@
 Основной модуль для асинхронной генерации курсовых работ.
 """
 
-import asyncio
+import contextlib
 import os
-import tempfile
 import shutil
+import tempfile
+
 from aiogram import Bot
 
-from db.database import update_order_status, save_full_tex, get_order_info
-from core.content_generator import generate_work_plan, generate_work_content_stepwise
-from core.latex_template import create_latex_document
+from core.content_generator import generate_work_content_stepwise, generate_work_plan
 from core.document_converter import compile_latex_to_pdf, convert_tex_to_docx
-from core.file_sender import send_tex_file_to_admin, send_generated_files_to_user, send_error_log_to_admin
+from core.file_sender import (
+    send_error_log_to_admin,
+    send_generated_files_to_user,
+    send_tex_file_to_admin,
+)
+from core.latex_template import create_latex_document
 from core.page_calculator import count_pages_in_text, count_total_pages_in_document, parse_work_plan
+from db.database import get_order_info, save_full_tex, update_order_status
 from gpt.assistant import clear_conversation
+
 
 # Исключение для ошибок компиляции LaTeX
 class LaTeXCompilationError(Exception):
@@ -214,10 +220,8 @@ async def generate_work_async(
         except Exception as send_error:
             print(f"Failed to send error message: {send_error}")
             # Если и короткое сообщение не отправляется, отправляем минимальное
-            try:
+            with contextlib.suppress(Exception):
                 await bot.send_message(chat_id, "⚠️ Произошла ошибка. Администратор бота уже уведомлен и скоро пришлет вам работу.")
-            except:
-                pass
     
     finally:
         # Очищаем историю беседы для заказа

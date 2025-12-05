@@ -1,0 +1,65 @@
+[tool.ruff]
+# Python version
+target-version = "py311"
+line-length = 100
+
+# Exclude common directories
+exclude = [
+    ".git",
+    "__pycache__",
+    ".venv",
+    "venv",
+    "env",
+    ".env",
+    "build",
+    "dist",
+    "*.egg-info",
+]
+
+[tool.ruff.lint]
+# Enable specific rule sets
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+    "ARG", # flake8-unused-arguments
+    "SIM", # flake8-simplify
+    "TCH", # flake8-type-checking
+    "PIE", # flake8-pie
+    "PT",  # flake8-pytest-style
+    "RET", # flake8-return
+    "RUF", # Ruff-specific rules
+    "PLR", # Pylint rules (для проверки сложности функций)
+]
+
+# Ignore specific rules
+ignore = [
+    "E501",  # line too long (handled by formatter)
+    "B008",  # do not perform function calls in argument defaults
+    "T201",  # print statements (we might use them for logging)
+    "RUF001",  # ambiguous characters in strings (кириллица в строках - это нормально)
+    "RUF002",  # ambiguous characters in docstrings (русские docstrings - это нормально)
+    "RUF003",  # ambiguous characters in comments (русские комментарии - это нормально)
+    "W293",  # blank line contains whitespace (пустые строки с пробелами - это нормально)
+]
+
+[tool.ruff.lint.pylint]
+max-statements = 50  # Ограничение количества statements в функции (примерно соответствует ~50 строкам)
+
+[tool.ruff.lint.isort]
+known-first-party = ["core", "db", "gpt", "handlers", "keyboards", "services", "utils"]
+
+[tool.ruff.format]
+# Use double quotes for strings
+quote-style = "double"
+# Indent with spaces
+indent-style = "space"
+# Respect magic trailing comma
+skip-magic-trailing-comma = false
+# Automatically detect the appropriate line ending
+line-ending = "auto"
+

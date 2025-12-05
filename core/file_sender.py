@@ -2,14 +2,15 @@
 Модуль для отправки файлов пользователям и администраторам.
 """
 
-import os
 import html
+import os
+
 from aiogram import Bot
 from aiogram.types import FSInputFile
 
 from core.settings import settings
-from utils.admin_logger import send_admin_log
 from db.database import get_order_info
+from utils.admin_logger import send_admin_log
 
 
 async def send_tex_file_to_admin(bot: Bot, order_id: int, tex_path: str, theme: str) -> None:
@@ -140,8 +141,8 @@ async def send_error_log_to_admin(bot: Bot, order_id: int, error: Exception, is_
                     error_text = error_text[:500] + "..."
                 
                 await send_admin_log(
-                    bot, 
-                    fake_user, 
+                    bot,
+                    fake_user,
                     f"🚨 <b>Ошибка генерации работы</b>\n"
                     f"  <b>Заказ:</b> #{order_id}\n"
                     f"  <b>Тема:</b> {order_info['theme'][:100]}\n"

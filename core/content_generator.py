@@ -2,16 +2,14 @@
 Модуль для генерации содержания работ через GPT с контролем объема.
 """
 
-from typing import List, Dict, Tuple
-from gpt.assistant import ask_assistant
 from core.page_calculator import (
-    parse_work_plan, 
-    calculate_pages_per_chapter, 
+    calculate_content_pages_for_target,
+    calculate_pages_per_chapter,
     count_pages_in_text,
+    parse_work_plan,
     should_generate_subsections,
-    is_chapter_complete,
-    calculate_content_pages_for_target
 )
+from gpt.assistant import ask_assistant
 
 
 async def generate_work_plan(order_id: int, model_name: str, theme: str, pages: int, work_type: str) -> str:
@@ -50,10 +48,10 @@ async def generate_work_plan(order_id: int, model_name: str, theme: str, pages: 
 
 
 async def generate_work_content_stepwise(
-    order_id: int, 
-    model_name: str, 
-    theme: str, 
-    pages: int, 
+    order_id: int,
+    model_name: str,
+    theme: str,
+    pages: int,
     work_type: str,
     plan_text: str,
     progress_callback=None
@@ -163,10 +161,10 @@ async def generate_work_content_stepwise(
 
 
 async def generate_chapter_content(
-    order_id: int, 
-    model_name: str, 
-    chapter_title: str, 
-    theme: str, 
+    order_id: int,
+    model_name: str,
+    chapter_title: str,
+    theme: str,
     target_pages: float,
     work_type: str
 ) -> str:
@@ -266,10 +264,10 @@ async def generate_chapter_content(
 
 
 async def generate_subsections_content(
-    order_id: int, 
-    model_name: str, 
-    chapter_title: str, 
-    subsections: List[str], 
+    order_id: int,
+    model_name: str,
+    chapter_title: str,
+    subsections: list[str],
     target_pages: float,
     theme: str
 ) -> str:
@@ -302,7 +300,7 @@ async def generate_subsections_content(
     pages_per_subsection = target_pages / len(subsections)
     subsections_content = ""
     
-    for i, subsection in enumerate(subsections):
+    for _i, subsection in enumerate(subsections):
         subsection_prompt = f"""
 Напиши подраздел "{subsection}" для главы "{chapter_title}" в работе на тему "{theme}".
 
@@ -437,7 +435,7 @@ async def generate_full_work_content_legacy(order_id: int, model_name: str, them
 
 
 def fix_section_commands(content: str, expected_subsection_title: str) -> str:
-    """
+    r"""
     Исправляет неправильные команды LaTeX в подразделах.
     Заменяет \section на \subsection если GPT ошибся.
     

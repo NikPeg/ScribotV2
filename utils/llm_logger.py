@@ -3,11 +3,10 @@
 Логи сохраняются в файлы с ротацией (храним только 2 дня).
 """
 
-import os
 import json
+import os
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, Any
 
 # Директория для логов (будет монтироваться как volume)
 LOG_DIR = os.getenv('LLM_LOG_DIR', './logs')
@@ -61,8 +60,8 @@ def clean_old_logs():
         print(f"Ошибка при очистке старых логов: {e}")
 
 
-def log_llm_request(order_id: int, model_name: str, prompt: str, response: str, 
-                   error: str = None, duration_ms: float = None, conversation_history: list = None):
+def log_llm_request(order_id: int, model_name: str, prompt: str, response: str,
+                   error: str | None = None, duration_ms: float | None = None, conversation_history: list | None = None):
     """
     Логирует запрос к LLM и ответ.
     

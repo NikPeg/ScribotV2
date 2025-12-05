@@ -5,19 +5,19 @@
 
 import asyncio
 import os
-import tempfile
 import sys
+import tempfile
 from pathlib import Path
 
 # Добавляем корневую директорию в путь
 sys.path.insert(0, str(Path(__file__).parent))
 
-from db.database import init_db, create_order, update_order_status, save_full_tex, get_order_info
-from core.content_generator import generate_work_plan, generate_work_content_stepwise
-from core.latex_template import create_latex_document
+from core.content_generator import generate_work_content_stepwise, generate_work_plan
 from core.document_converter import compile_latex_to_pdf, convert_tex_to_docx
+from core.latex_template import create_latex_document
 from core.page_calculator import count_pages_in_text, count_total_pages_in_document, parse_work_plan
-from gpt.assistant import init_conversation, clear_conversation, TEST_MODEL_NAME
+from db.database import create_order, init_db, save_full_tex, update_order_status
+from gpt.assistant import TEST_MODEL_NAME, clear_conversation, init_conversation
 
 
 async def generate_test_work(
@@ -25,7 +25,7 @@ async def generate_test_work(
     pages: int = 2,
     work_type: str = "курсовая",
     model_name: str = TEST_MODEL_NAME,
-    output_dir: str = None
+    output_dir: str | None = None
 ):
     """
     Генерирует тестовую работу без использования Telegram бота.
@@ -168,7 +168,7 @@ async def generate_test_work(
         if output_docx_path:
             print(f"   • {os.path.basename(output_docx_path)}")
         print()
-        print(f"📊 Статистика:")
+        print("📊 Статистика:")
         print(f"   • Контент: {content_pages:.1f} страниц")
         print(f"   • Всего: {total_pages:.1f} страниц (цель: {pages})")
         print()

@@ -1,8 +1,12 @@
 # utils/admin_logger.py
+import contextlib
 import html
+
 from aiogram import Bot
 from aiogram.types import User
+
 from core import settings
+
 
 async def send_admin_log(bot: Bot, user: User, log_details: str):
     """
@@ -22,12 +26,9 @@ async def send_admin_log(bot: Bot, user: User, log_details: str):
     log_message += f"<b>Действие:</b> {log_details}"
 
     # Отправляем лог
-    try:
+    with contextlib.suppress(Exception):
         await bot.send_message(
             chat_id=settings.admin_id,
             text=log_message,
             parse_mode="HTML"
         )
-    except Exception:
-        # Игнорируем ошибки отправки, чтобы бот не падал
-        pass

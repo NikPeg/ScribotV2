@@ -7,8 +7,9 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
 from core import settings
-from handlers import routers_list
 from db.database import init_db
+from handlers import routers_list
+
 
 async def main() -> None:
     await init_db()

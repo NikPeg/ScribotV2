@@ -1,12 +1,12 @@
+import random
+
 from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message, CallbackQuery
+from aiogram.types import CallbackQuery, Message
 
-import random
-from core import settings
-from core import OrderStates
-from keyboards import get_main_menu_keyboard, get_back_to_menu_keyboard
+from core import OrderStates, settings
+from keyboards import get_back_to_menu_keyboard, get_main_menu_keyboard
 from utils.admin_logger import send_admin_log
 
 common_router = Router()

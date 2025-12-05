@@ -2,14 +2,16 @@
 Сервис для проверки подписки пользователей на обязательные каналы.
 """
 import logging
+
 from aiogram import Bot
+
 from core.settings import get_required_channels
 
 logger = logging.getLogger(__name__)
 
 
 async def check_user_subscription(
-    bot: Bot, user_id: int, channels: list[str] = None
+    bot: Bot, user_id: int, channels: list[str] | None = None
 ) -> dict[str, bool]:
     """
     Проверяет подписку пользователя на список каналов.
@@ -47,7 +49,7 @@ async def check_user_subscription(
     return results
 
 
-async def is_user_subscribed_to_all(bot: Bot, user_id: int, channels: list[str] = None) -> bool:
+async def is_user_subscribed_to_all(bot: Bot, user_id: int, channels: list[str] | None = None) -> bool:
     """
     Проверяет, подписан ли пользователь на все обязательные каналы.
 

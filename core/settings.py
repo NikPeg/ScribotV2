@@ -1,5 +1,7 @@
-from pydantic_settings import BaseSettings, SettingsConfigDict
 from enum import Enum
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
 
 class LogLevel(str, Enum):
     """Определяет возможные уровни логирования в чат админа."""

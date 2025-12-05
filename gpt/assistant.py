@@ -1,17 +1,17 @@
-import asyncio
 import time
+
 from openai import AsyncOpenAI
-from typing import List, Dict
+
 from core import settings
-from utils.llm_logger import log_llm_request
 from core.test_data_generator import (
     TEST_MODEL_NAME,
-    generate_test_plan,
     generate_test_bibliography,
     generate_test_content,
+    generate_test_plan,
     generate_test_subsection,
-    generate_test_subsections_list
+    generate_test_subsections_list,
 )
+from utils.llm_logger import log_llm_request
 
 # Инициализируем клиента OpenRouter
 client = AsyncOpenAI(
@@ -30,7 +30,7 @@ SYSTEM_PROMPT = (
 
 # Хранилище истории сообщений для каждого заказа
 # Ключ: order_id, значение: список сообщений
-conversation_history: Dict[int, List[Dict[str, str]]] = {}
+conversation_history: dict[int, list[dict[str, str]]] = {}
 
 
 def init_conversation(order_id: int, theme: str) -> None:
@@ -60,8 +60,7 @@ def clear_conversation(order_id: int) -> None:
     Args:
         order_id: ID заказа
     """
-    if order_id in conversation_history:
-        del conversation_history[order_id]
+    conversation_history.pop(order_id, None)
 
 
 async def ask_assistant(order_id: int, prompt: str, model_name: str) -> str:
@@ -126,7 +125,7 @@ async def ask_assistant(order_id: int, prompt: str, model_name: str) -> str:
             
     except Exception as e:
         error = str(e)
-        assistant_message = f"Произошла ошибка при генерации ответа: {str(e)}"
+        assistant_message = f"Произошла ошибка при генерации ответа: {e!s}"
         print(f"Ошибка при запросе к OpenRouter API: {e}")
     
     finally:
@@ -254,7 +253,6 @@ def _extract_pages_from_prompt(prompt: str) -> int:
 
 def _extract_work_type_from_prompt(prompt: str) -> str:
     """Извлекает тип работы из промпта."""
-    import re
     work_types = ['курсовая', 'дипломная', 'реферат', 'доклад', 'исследование']
     for wt in work_types:
         if wt in prompt.lower():

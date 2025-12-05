@@ -3,14 +3,12 @@
 """
 
 import random
-from typing import List
-
 
 # Константа для тестового режима
 TEST_MODEL_NAME = "TEST"
 
 
-def generate_test_plan(theme: str, pages: int, work_type: str) -> str:
+def generate_test_plan(theme: str, pages: int, _work_type: str) -> str:
     """
     Генерирует тестовый план работы, который можно распарсить.
     
@@ -242,7 +240,7 @@ def generate_test_content(chapter_title: str, theme: str, target_pages: float) -
     return content
 
 
-def generate_test_subsection(subsection_title: str, chapter_title: str, theme: str, target_pages: float) -> str:
+def generate_test_subsection(subsection_title: str, _chapter_title: str, theme: str, target_pages: float) -> str:
     """
     Генерирует тестовое содержание подраздела.
     
@@ -285,7 +283,7 @@ def generate_test_subsection(subsection_title: str, chapter_title: str, theme: s
     return content
 
 
-def generate_test_subsections_list(chapter_title: str, theme: str) -> str:
+def generate_test_subsections_list(_chapter_title: str, _theme: str) -> str:
     """
     Генерирует список подразделов для главы (если они не были указаны в плане).
     

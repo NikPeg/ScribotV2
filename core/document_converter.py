@@ -3,12 +3,12 @@
 """
 
 import asyncio
+import contextlib
 import os
 import re
-from typing import Tuple
 
 
-async def compile_latex_to_pdf(tex_content: str, output_dir: str, filename: str) -> Tuple[bool, str]:
+async def compile_latex_to_pdf(tex_content: str, output_dir: str, filename: str) -> tuple[bool, str]:
     """
     Асинхронно компилирует LaTeX в PDF.
     Запускает pdflatex дважды для корректной генерации содержания, ссылок и библиографии.
@@ -82,10 +82,10 @@ async def compile_latex_to_pdf(tex_content: str, output_dir: str, filename: str)
         return False, error_msg
             
     except Exception as e:
-        return False, f"Exception during LaTeX compilation: {str(e)}"
+        return False, f"Exception during LaTeX compilation: {e!s}"
 
 
-async def convert_tex_to_docx(tex_content: str, output_dir: str, filename: str) -> Tuple[bool, str]:
+async def convert_tex_to_docx(tex_content: str, output_dir: str, filename: str) -> tuple[bool, str]:
     """
     Конвертирует TEX напрямую в DOCX используя pandoc или LibreOffice.
     
@@ -117,17 +117,15 @@ async def convert_tex_to_docx(tex_content: str, output_dir: str, filename: str) 
             stderr=asyncio.subprocess.PIPE
         )
         
-        stdout, stderr = await pandoc_process.communicate()
+        _stdout, _stderr = await pandoc_process.communicate()
         
         if pandoc_process.returncode == 0 and os.path.exists(docx_file):
             # Удаляем временный файл
-            try:
+            with contextlib.suppress(OSError):
                 os.remove(tex_file)
-            except:
-                pass
             return True, docx_file
             
-    except Exception as e:
+    except Exception:
         # pandoc не найден или не работает, пробуем LibreOffice
         pass
     
@@ -135,7 +133,7 @@ async def convert_tex_to_docx(tex_content: str, output_dir: str, filename: str) 
     return await _convert_via_libreoffice(tex_content, output_dir, filename)
 
 
-async def _convert_via_libreoffice(tex_content: str, output_dir: str, filename: str) -> Tuple[bool, str]:
+async def _convert_via_libreoffice(tex_content: str, output_dir: str, filename: str) -> tuple[bool, str]:
     """
     Конвертирует через LibreOffice как резервный метод.
     
@@ -187,27 +185,23 @@ async def _convert_via_libreoffice(tex_content: str, output_dir: str, filename: 
                     stderr=asyncio.subprocess.PIPE
                 )
                 
-                stdout, stderr = await process.communicate()
+                _stdout, _stderr = await process.communicate()
                 
                 # Переименовываем результат
                 txt_docx = os.path.join(output_dir, f"{filename}_temp.docx")
                 if process.returncode == 0 and os.path.exists(txt_docx):
-                    try:
+                    with contextlib.suppress(OSError):
                         os.rename(txt_docx, docx_file)
                         os.remove(txt_file)
                         return True, docx_file
-                    except:
-                        pass
                 
                 # Очищаем временные файлы
-                try:
+                with contextlib.suppress(OSError):
                     os.remove(txt_file)
                     if os.path.exists(txt_docx):
                         os.remove(txt_docx)
-                except:
-                    pass
                     
-        except Exception as e:
+        except Exception:
             continue
     
     return False, "Neither pandoc nor LibreOffice could convert to DOCX"
@@ -228,6 +222,4 @@ def _extract_text_from_latex(tex_content: str) -> str:
     clean_text = re.sub(r'\\[a-zA-Z]+', '', clean_text)
     clean_text = re.sub(r'\{[^}]*\}', '', clean_text)
     clean_text = re.sub(r'\\\\', '\n', clean_text)
-    clean_text = re.sub(r'\n\s*\n', '\n\n', clean_text)
-    
-    return clean_text
+    return re.sub(r'\n\s*\n', '\n\n', clean_text)

@@ -1,7 +1,8 @@
 # db/database.py
-import aiosqlite
 import os
 from datetime import datetime
+
+import aiosqlite
 
 # Путь к базе данных: используем переменную окружения или дефолтный путь
 DB_DIR = os.getenv('DB_DIR', '.')
