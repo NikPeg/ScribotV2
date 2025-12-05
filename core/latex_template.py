@@ -32,12 +32,11 @@ LATEX_TEMPLATE = r"""
 
 \begin{document}
 
-% Титульный лист: используем два отдельных блока \begin{center}...\end{center}
+% Титульный лист: используем один блок \begin{center}...\end{center}
 % вместо окружения \begin{titlepage}...\end{titlepage}, чтобы избежать
 % появления пустой страницы между титульным листом и содержанием.
 % Окружение titlepage автоматически создает новую страницу после себя,
 % что приводит к появлению лишней пустой страницы.
-% Разделение на два блока center позволяет контролировать переход к следующей странице.
 \begin{center}
 \vspace*{2cm}
 {\Large\textbf{МИНИСТЕРСТВО ОБРАЗОВАНИЯ И НАУКИ РФ}}\\[0.5cm]
@@ -61,16 +60,9 @@ LATEX_TEMPLATE = r"""
 Петров П.П.
 \end{flushright}
 
-~\\
-
 \vspace*{\fill}
 
-\end{center}
-
-\begin{center}
-
-\vspace*{\fill}{
-  Москва \the\year{}}
+Москва \the\year{}
 
 \end{center}
 
