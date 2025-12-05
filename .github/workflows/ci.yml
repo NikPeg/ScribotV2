@@ -55,6 +55,13 @@ jobs:
           pip install -r requirements.txt
       
       - name: Run tests
+        env:
+          BOT_TOKEN: "test_token"
+          CHAT_URL: "https://test.chat.url"
+          FEEDBACK_URL: "https://test.feedback.url"
+          SOS_URL: "https://test.sos.url"
+          ADMIN_ID: "123456789"
+          LLM_TOKEN: "test_llm_token"
         run: |
           python -m unittest discover tests -v
 
