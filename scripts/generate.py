@@ -17,8 +17,8 @@ ARG_INDEX_PAGES = 2
 ARG_INDEX_WORK_TYPE = 3
 ARG_INDEX_MODEL_NAME = 4
 
-# Добавляем корневую директорию в путь
-sys.path.insert(0, str(Path(__file__).parent))
+# Добавляем корневую директорию проекта в путь
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Импорты после изменения sys.path необходимы для работы скрипта
 from core.content_generator import (  # noqa: E402
