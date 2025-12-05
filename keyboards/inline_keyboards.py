@@ -2,6 +2,7 @@ from aiogram.types import InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from core import settings
+from core.settings import get_required_channels
 
 def get_main_menu_keyboard():
     """Возвращает клавиатуру для главного меню."""
@@ -93,4 +94,61 @@ def get_model_keyboard():
     # Каждая кнопка на новой строке
     builder.adjust(1)
 
+    return builder.as_markup()
+
+
+def get_subscription_keyboard():
+    """
+    Создает клавиатуру с кнопками для подписки на каналы.
+    """
+    builder = InlineKeyboardBuilder()
+    channels = get_required_channels()
+    
+    if not channels:
+        # Если каналов нет, возвращаем пустую клавиатуру
+        return builder.as_markup()
+    
+    # Добавляем кнопки со ссылками на каналы
+    for channel in channels:
+        if channel.startswith("@"):
+            channel_name = channel[1:]
+            builder.button(
+                text=f"📢 {channel_name}",
+                url=f"https://t.me/{channel_name}"
+            )
+        else:
+            # Если канал задан как ID (отрицательное число для супергрупп),
+            # используем формат t.me/c/{channel_id_without_minus}
+            # Для обычных каналов с username без @ - просто username
+            try:
+                # Пытаемся определить, это числовой ID или username
+                channel_id = int(channel)
+                if channel_id < 0:
+                    # Супергруппа - используем формат t.me/c/{id_without_minus}
+                    builder.button(
+                        text=f"📢 Канал",
+                        url=f"https://t.me/c/{abs(channel_id)}"
+                    )
+                else:
+                    # Положительный ID - это может быть публичный канал
+                    builder.button(
+                        text=f"📢 Канал",
+                        url=f"https://t.me/c/{channel_id}"
+                    )
+            except ValueError:
+                # Это username без @
+                builder.button(
+                    text=f"📢 {channel}",
+                    url=f"https://t.me/{channel}"
+                )
+    
+    # Добавляем кнопку "Я подписался"
+    builder.button(
+        text="✅ Я подписался",
+        callback_data="check_subscription"
+    )
+    
+    # Каждая кнопка на новой строке
+    builder.adjust(1)
+    
     return builder.as_markup()

@@ -5,11 +5,17 @@ from aiogram.types import Message, CallbackQuery
 from utils.admin_logger import send_admin_log
 import html
 import asyncio
+import logging
 from core import OrderStates
+from core.settings import get_required_channels
 from keyboards import get_pages_keyboard, get_work_type_keyboard, get_model_keyboard, get_back_to_menu_keyboard
+from keyboards.inline_keyboards import get_subscription_keyboard
 from db.database import create_order
 from gpt.assistant import init_conversation
 from core.work_generator import generate_work_async
+from services.subscription_service import is_user_subscribed_to_all
+
+logger = logging.getLogger(__name__)
 
 order_router = Router()
 
@@ -91,12 +97,34 @@ async def back_to_type(callback: CallbackQuery, state: FSMContext):
 @order_router.callback_query(StateFilter(OrderStates.GET_MODEL), F.data.startswith("model:"))
 async def handle_model(callback: CallbackQuery, state: FSMContext, bot: Bot):
     """
-    Завершает сбор данных, создает заказ в БД, запускает фоновую
-    генерацию работы и отправляет лог.
+    Завершает сбор данных, проверяет подписку на каналы,
+    создает заказ в БД, запускает фоновую генерацию работы и отправляет лог.
     """
     model = callback.data.split(":")[1]
     await state.update_data(model=model)
     user_data = await state.get_data()
+
+    # Проверяем подписку на обязательные каналы
+    required_channels = get_required_channels()
+    if required_channels:
+        is_subscribed = await is_user_subscribed_to_all(bot, callback.from_user.id, required_channels)
+        if not is_subscribed:
+            # Пользователь не подписан на все каналы
+            logger.info(f"USER{callback.from_user.id}: попытка генерации без подписки на каналы")
+            await callback.answer()
+            
+            # Отправляем сообщение с просьбой подписаться
+            subscription_message = (
+                "🔔 <b>Для использования бота необходимо подписаться на наши каналы!</b>\n\n"
+                "Пожалуйста, подпишитесь на все указанные каналы и нажмите кнопку «✅ Я подписался»."
+            )
+            await callback.message.answer(
+                text=subscription_message,
+                reply_markup=get_subscription_keyboard()
+            )
+            await send_admin_log(bot, callback.from_user, "Попытка генерации без подписки на каналы")
+            # Прерываем обработку - не создаем заказ и не запускаем генерацию
+            return
 
     # <<< ИСПРАВЛЕНИЕ 1: Используем тройные кавычки для многострочной f-строки
     summary_text = (
