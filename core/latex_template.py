@@ -30,8 +30,13 @@ LATEX_TEMPLATE = r"""
 
 \begin{{document}}
 
-\begin{{titlepage}}
-\centering
+% Титульный лист: используем два отдельных блока \begin{center}...\end{center}
+% вместо окружения \begin{titlepage}...\end{titlepage}, чтобы избежать
+% появления пустой страницы между титульным листом и содержанием.
+% Окружение titlepage автоматически создает новую страницу после себя,
+% что приводит к появлению лишней пустой страницы.
+% Разделение на два блока center позволяет контролировать переход к следующей странице.
+\begin{{center}}
 \vspace*{{2cm}}
 {{\Large\textbf{{МИНИСТЕРСТВО ОБРАЗОВАНИЯ И НАУКИ РФ}}}}\\[0.5cm]
 {{\large Федеральное государственное бюджетное\\
@@ -54,12 +59,24 @@ LATEX_TEMPLATE = r"""
 Петров П.П.
 \end{{flushright}}
 
-\vfill
-{{\large Москва 2025}}
-\end{{titlepage}}
+~\\
+
+\vspace*{{\fill}}
+
+\end{{center}}
+
+\begin{{center}}
+
+\vspace*{{\fill}}{{
+  Москва \the\year{{}}}}
+
+\end{{center}}
+
+\newpage
 
 \tableofcontents
-\clearpage
+
+\newpage
 
 {content}
 
