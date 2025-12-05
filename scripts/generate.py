@@ -178,10 +178,6 @@ def _print_test_results(params: TestResultsParams) -> None:
     if params.output_docx_path:
         print(f"   • {os.path.basename(params.output_docx_path)}")
     print()
-    print("📊 Статистика:")
-    print(f"   • Контент: {params.content_pages:.1f} страниц")
-    print(f"   • Всего: {params.total_pages:.1f} страниц (цель: {params.pages})")
-    print()
 
 
 async def generate_test_work(

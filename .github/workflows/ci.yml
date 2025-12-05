@@ -47,7 +47,12 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y poppler-utils
+          sudo apt-get install -y --no-install-recommends \
+            poppler-utils \
+            texlive-latex-base \
+            texlive-latex-extra \
+            texlive-fonts-recommended \
+            texlive-lang-cyrillic
       
       - name: Install Python dependencies
         run: |

@@ -22,6 +22,24 @@ EXPECTED_PDF_PAGES = 426  # Ожидаемое количество страни
 MAX_REASONABLE_PAGES = 10000  # Максимальное разумное количество страниц для проверки
 
 
+def check_latex_available() -> bool:
+    """
+    Проверяет, доступен ли LaTeX (pdflatex) в системе.
+    
+    Returns:
+        True, если pdflatex доступен, False иначе
+    """
+    try:
+        result = subprocess.run(
+            ['pdflatex', '--version'],
+            capture_output=True,
+            timeout=5
+        )
+        return result.returncode == 0
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+
+
 def get_pdf_page_count(pdf_path: str) -> int:
     """
     Получает количество страниц в PDF файле используя pdfinfo.
@@ -72,6 +90,9 @@ class TestPDFGeneration(unittest.TestCase):
         В тестовом режиме генерируется фиксированный контент, поэтому проверяем
         что PDF создается корректно и имеет разумное количество страниц.
         """
+        if not check_latex_available():
+            self.skipTest("LaTeX (pdflatex) не установлен. Пропускаем тест генерации PDF.")
+        
         async def run_test():
             result = await generate_test_work(
                 theme=self.test_theme,
@@ -82,7 +103,11 @@ class TestPDFGeneration(unittest.TestCase):
             )
             
             # Проверяем, что PDF был создан
-            assert result['pdf_path'] is not None, "PDF файл должен быть создан"
+            if result['pdf_path'] is None:
+                raise AssertionError(
+                    "PDF файл не был создан. Возможно, LaTeX не установлен или произошла ошибка компиляции. "
+                    "Проверьте вывод генерации для деталей."
+                )
             assert os.path.exists(result['pdf_path']), f"PDF файл должен существовать: {result['pdf_path']}"
             
             # Получаем количество страниц в PDF
@@ -110,6 +135,9 @@ class TestPDFGeneration(unittest.TestCase):
         Тест: проверяет, что нет лишних пустых страниц между титульным листом и содержанием.
         Это критичный тест для отлова проблемы с пустыми страницами.
         """
+        if not check_latex_available():
+            self.skipTest("LaTeX (pdflatex) не установлен. Пропускаем тест генерации PDF.")
+        
         async def run_test():
             result = await generate_test_work(
                 theme=self.test_theme,
@@ -120,7 +148,11 @@ class TestPDFGeneration(unittest.TestCase):
             )
             
             # Проверяем, что PDF был создан
-            assert result['pdf_path'] is not None
+            if result['pdf_path'] is None:
+                raise AssertionError(
+                    "PDF файл не был создан. Возможно, LaTeX не установлен или произошла ошибка компиляции. "
+                    "Проверьте вывод генерации для деталей."
+                )
             assert os.path.exists(result['pdf_path'])
             
             # Получаем количество страниц в PDF
