@@ -3,32 +3,34 @@ LaTeX шаблон и утилиты для работы с LaTeX докумен
 """
 
 import re
+from string import Template
 
 # Шаблон LaTeX документа
+# Используем $ вместо {} для подстановки, чтобы избежать конфликтов с LaTeX командами
 LATEX_TEMPLATE = r"""
-\documentclass[12pt,a4paper,draft]{{article}}
-\usepackage[utf8]{{inputenc}}
-\usepackage[T2A]{{fontenc}}
-\usepackage[russian]{{babel}}
-\usepackage{{geometry}}
-\usepackage{{setspace}}
-\usepackage{{indentfirst}}
-\usepackage{{amsmath}}
-\usepackage{{amsfonts}}
-\usepackage{{amssymb}}
-\usepackage{{graphicx}}
-\usepackage[hidelinks]{{hyperref}}
+\documentclass[12pt,a4paper,draft]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T2A]{fontenc}
+\usepackage[russian]{babel}
+\usepackage{geometry}
+\usepackage{setspace}
+\usepackage{indentfirst}
+\usepackage{amsmath}
+\usepackage{amsfonts}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage[hidelinks]{hyperref}
 
-\geometry{{left=3cm,right=1.5cm,top=2cm,bottom=2cm}}
+\geometry{left=3cm,right=1.5cm,top=2cm,bottom=2cm}
 \onehalfspacing
-\setlength{{\parindent}}{{1.25cm}}
+\setlength{\parindent}{1.25cm}
 % Улучшение переноса строк для предотвращения overfull hbox
 \emergencystretch=3em
 \tolerance=1000
 \hfuzz=0.5pt
 \sloppy
 
-\begin{{document}}
+\begin{document}
 
 % Титульный лист: используем два отдельных блока \begin{center}...\end{center}
 % вместо окружения \begin{titlepage}...\end{titlepage}, чтобы избежать
@@ -36,41 +38,41 @@ LATEX_TEMPLATE = r"""
 % Окружение titlepage автоматически создает новую страницу после себя,
 % что приводит к появлению лишней пустой страницы.
 % Разделение на два блока center позволяет контролировать переход к следующей странице.
-\begin{{center}}
-\vspace*{{2cm}}
-{{\Large\textbf{{МИНИСТЕРСТВО ОБРАЗОВАНИЯ И НАУКИ РФ}}}}\\[0.5cm]
-{{\large Федеральное государственное бюджетное\\
-образовательное учреждение высшего образования}}\\[0.5cm]
-{{\Large\textbf{{РОССИЙСКИЙ ГОСУДАРСТВЕННЫЙ УНИВЕРСИТЕТ}}}}\\[2cm]
+\begin{center}
+\vspace*{2cm}
+{\Large\textbf{МИНИСТЕРСТВО ОБРАЗОВАНИЯ И НАУКИ РФ}}\\[0.5cm]
+{\large Федеральное государственное бюджетное\\
+образовательное учреждение высшего образования}\\[0.5cm]
+{\Large\textbf{РОССИЙСКИЙ ГОСУДАРСТВЕННЫЙ УНИВЕРСИТЕТ}}\\[2cm]
 
-{{\large Факультет информационных технологий}}\\[0.5cm]
-{{\large Кафедра программной инженерии}}\\[3cm]
+{\large Факультет информационных технологий}\\[0.5cm]
+{\large Кафедра программной инженерии}\\[3cm]
 
-{{\Large\textbf{{КУРСОВАЯ РАБОТА}}}}\\[0.5cm]
-{{\large по дисциплине}}\\[0.3cm]
-{{\large Информационные технологии}}\\[1cm]
+{\Large\textbf{КУРСОВАЯ РАБОТА}}\\[0.5cm]
+{\large по дисциплине}\\[0.3cm]
+{\large Информационные технологии}\\[1cm]
 
-{{\Large\textbf{{Тема: {theme}}}}}\\[3cm]
+{\Large\textbf{Тема: $theme}}\\[3cm]
 
-\begin{{flushright}}
+\begin{flushright}
 Выполнил: студент группы ИТ-21\\
 Иванов И.И.\\[1cm]
 Проверил: к.т.н., доцент\\
 Петров П.П.
-\end{{flushright}}
+\end{flushright}
 
 ~\\
 
-\vspace*{{\fill}}
+\vspace*{\fill}
 
-\end{{center}}
+\end{center}
 
-\begin{{center}}
+\begin{center}
 
-\vspace*{{\fill}}{{
-  Москва \the\year{{}}}}
+\vspace*{\fill}{
+  Москва \the\year{}}
 
-\end{{center}}
+\end{center}
 
 \newpage
 
@@ -78,9 +80,9 @@ LATEX_TEMPLATE = r"""
 
 \newpage
 
-{content}
+$content
 
-\end{{document}}
+\end{document}
 """
 
 def fix_bibliography_ampersands(content: str) -> str:
@@ -249,8 +251,10 @@ def create_latex_document(theme: str, content: str) -> str:
     # Исправляем символы & в списке литературы
     content = fix_bibliography_ampersands(content)
     
-    # Создаем полный LaTeX документ
-    return LATEX_TEMPLATE.format(theme=theme, content=content)
+    # Используем Template для безопасной подстановки, чтобы избежать конфликтов
+    # с фигурными скобками в LaTeX командах
+    template = Template(LATEX_TEMPLATE)
+    return template.substitute(theme=theme, content=content)
 
 
 def improve_hyphenation(content: str) -> str:
