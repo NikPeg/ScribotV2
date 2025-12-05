@@ -5,6 +5,9 @@ LaTeX шаблон и утилиты для работы с LaTeX докумен
 import re
 from string import Template
 
+# Константы
+MIN_WORD_LENGTH_FOR_HYPHENATION = 10  # Минимальная длина слова для добавления точки переноса
+
 # Шаблон LaTeX документа
 # Используем $ вместо {} для подстановки, чтобы избежать конфликтов с LaTeX командами
 LATEX_TEMPLATE = r"""
@@ -291,8 +294,8 @@ def improve_hyphenation(content: str) -> str:
         def add_break_before_long_word(match):
             space = match.group(1)
             word = match.group(2)
-            # Добавляем точку переноса только перед очень длинными словами (более 10 символов)
-            if len(word) > 10 and '\\' not in word:
+            # Добавляем точку переноса только перед очень длинными словами
+            if len(word) > MIN_WORD_LENGTH_FOR_HYPHENATION and '\\' not in word:
                 return space + '\\hspace{0pt}' + word
             return match.group(0)
         

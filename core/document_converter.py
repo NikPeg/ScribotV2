@@ -7,6 +7,9 @@ import contextlib
 import os
 import re
 
+# Константы
+MIN_PDF_SIZE_BYTES = 1000  # Минимальный размер PDF файла (1KB)
+
 
 async def compile_latex_to_pdf(tex_content: str, output_dir: str, filename: str) -> tuple[bool, str]:
     """
@@ -60,7 +63,7 @@ async def compile_latex_to_pdf(tex_content: str, output_dir: str, filename: str)
         if os.path.exists(pdf_file):
             # Проверяем размер файла - если он слишком маленький, возможно компиляция не удалась
             file_size = os.path.getsize(pdf_file)
-            if file_size > 1000:  # Минимальный размер PDF (1KB)
+            if file_size > MIN_PDF_SIZE_BYTES:
                 return True, pdf_file
         
         # Если PDF не создан или слишком маленький - это реальная ошибка

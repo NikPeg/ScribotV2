@@ -12,6 +12,9 @@ from core.settings import settings
 from db.database import get_order_info
 from utils.admin_logger import send_admin_log
 
+# Константы
+MAX_ERROR_TEXT_LENGTH = 500  # Максимальная длина текста ошибки для отправки
+
 
 async def send_tex_file_to_admin(bot: Bot, order_id: int, tex_path: str, theme: str) -> None:
     """
@@ -137,8 +140,8 @@ async def send_error_log_to_admin(bot: Bot, order_id: int, error: Exception, is_
             else:
                 # Для других ошибок - краткое сообщение
                 error_text = str(error)
-                if len(error_text) > 500:
-                    error_text = error_text[:500] + "..."
+                if len(error_text) > MAX_ERROR_TEXT_LENGTH:
+                    error_text = error_text[:MAX_ERROR_TEXT_LENGTH] + "..."
                 
                 await send_admin_log(
                     bot,

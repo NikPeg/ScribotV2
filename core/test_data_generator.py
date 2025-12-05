@@ -7,6 +7,16 @@ import random
 # Константа для тестового режима
 TEST_MODEL_NAME = "TEST"
 
+# Константы для определения структуры работы
+SMALL_WORK_PAGES_THRESHOLD = 10  # Порог для малых работ (<= 10 страниц)
+MEDIUM_WORK_PAGES_THRESHOLD = 20  # Порог для средних работ (<= 20 страниц)
+LARGE_WORK_PAGES_THRESHOLD = 20  # Порог для больших работ (> 20 страниц)
+
+# Константы для вероятности добавления ссылок
+CITATION_PROBABILITY_HIGH = 0.5  # Высокая вероятность добавления ссылки
+CITATION_PROBABILITY_MEDIUM = 0.4  # Средняя вероятность добавления ссылки
+CITATION_PROBABILITY_LOW = 0.3  # Низкая вероятность добавления ссылки
+
 
 def generate_test_plan(theme: str, pages: int, _work_type: str) -> str:
     """
@@ -21,9 +31,9 @@ def generate_test_plan(theme: str, pages: int, _work_type: str) -> str:
         Структурированный план работы
     """
     # Определяем количество глав в зависимости от объема
-    if pages <= 10:
+    if pages <= SMALL_WORK_PAGES_THRESHOLD:
         num_chapters = 2
-    elif pages <= 20:
+    elif pages <= MEDIUM_WORK_PAGES_THRESHOLD:
         num_chapters = 3
     else:
         num_chapters = 4
@@ -51,7 +61,7 @@ def generate_test_plan(theme: str, pages: int, _work_type: str) -> str:
             plan_lines.append(f"{i}. {title}")
             plan_lines.append(f"   {i}.1 Первый подраздел")
             plan_lines.append(f"   {i}.2 Второй подраздел")
-            if pages > 20:
+            if pages > LARGE_WORK_PAGES_THRESHOLD:
                 plan_lines.append(f"   {i}.3 Третий подраздел")
             plan_lines.append("")
     
@@ -191,7 +201,7 @@ def generate_test_content(chapter_title: str, theme: str, target_pages: float) -
             para = random.choice(lorem_paragraphs)
             content += f"\n\n{para} "
             # Добавляем случайные ссылки на источники
-            if random.random() > 0.5:
+            if random.random() > CITATION_PROBABILITY_HIGH:
                 source_num = random.randint(1, 20)
                 content += f"\\cite{{source{source_num}}} "
         
@@ -210,7 +220,7 @@ def generate_test_content(chapter_title: str, theme: str, target_pages: float) -
         for _ in range(num_paragraphs):
             para = random.choice(lorem_paragraphs)
             content += f"\n\n{para} "
-            if random.random() > 0.5:
+            if random.random() > CITATION_PROBABILITY_HIGH:
                 source_num = random.randint(1, 20)
                 content += f"\\cite{{source{source_num}}} "
         
@@ -233,7 +243,7 @@ def generate_test_content(chapter_title: str, theme: str, target_pages: float) -
         for _ in range(num_paragraphs):
             para = random.choice(lorem_paragraphs)
             content += f"\n\n{para} "
-            if random.random() > 0.3:
+            if random.random() > CITATION_PROBABILITY_LOW:
                 source_num = random.randint(1, 20)
                 content += f"\\cite{{source{source_num}}} "
     
@@ -276,7 +286,7 @@ def generate_test_subsection(subsection_title: str, _chapter_title: str, theme: 
     for _ in range(num_paragraphs):
         para = random.choice(lorem_paragraphs)
         content += f"\n\n{para} "
-        if random.random() > 0.4:
+        if random.random() > CITATION_PROBABILITY_MEDIUM:
             source_num = random.randint(1, 20)
             content += f"\\cite{{source{source_num}}} "
     

@@ -6,10 +6,16 @@ import contextlib
 import os
 import shutil
 import tempfile
+from dataclasses import dataclass
 
 from aiogram import Bot
 
-from core.content_generator import generate_work_content_stepwise, generate_work_plan
+from core.content_generator import (
+    WorkContentParams,
+    generate_simple_work_content,
+    generate_work_content_stepwise,
+    generate_work_plan,
+)
 from core.document_converter import compile_latex_to_pdf, convert_tex_to_docx
 from core.file_sender import (
     send_error_log_to_admin,
@@ -22,6 +28,58 @@ from db.database import get_order_info, save_full_tex, update_order_status
 from gpt.assistant import clear_conversation
 
 
+@dataclass
+class ProgressUpdateParams:
+    """Параметры для обновления прогресса."""
+    bot: Bot
+    chat_id: int
+    message_id: int
+    stage: int
+    description: str
+    total_stages: int = 6
+
+
+@dataclass
+class SimpleWorkGenerationParams:
+    """Параметры для генерации простой работы."""
+    order_id: int
+    model_name: str
+    theme: str
+    work_type: str
+    bot: Bot
+    chat_id: int
+    message_id_to_edit: int
+    total_stages: int
+
+
+@dataclass
+class LargeWorkGenerationParams:
+    """Параметры для генерации большой работы."""
+    order_id: int
+    model_name: str
+    theme: str
+    pages: int
+    work_type: str
+    bot: Bot
+    chat_id: int
+    message_id_to_edit: int
+    total_stages: int
+
+
+@dataclass
+class CompileAndSendParams:
+    """Параметры для компиляции и отправки файлов."""
+    full_tex: str
+    order_id: int
+    theme: str
+    pages: int
+    bot: Bot
+    chat_id: int
+    message_id_to_edit: int
+    temp_dir: str
+    filename: str
+
+
 # Исключение для ошибок компиляции LaTeX
 class LaTeXCompilationError(Exception):
     """Исключение для ошибок компиляции LaTeX с полным текстом ошибки."""
@@ -32,6 +90,148 @@ class LaTeXCompilationError(Exception):
 # Для "прогресс-бара"
 READY_SYMBOL = "🟦"
 UNREADY_SYMBOL = "⬜️"
+
+# Константы
+SMALL_WORK_PAGES = 2  # Количество страниц для малых работ (используется упрощенная генерация)
+
+
+async def _generate_simple_work(params: SimpleWorkGenerationParams) -> str:
+    """Генерирует простую работу (1-2 страницы) без плана и оглавления."""
+    await _update_progress(ProgressUpdateParams(params.bot, params.chat_id, params.message_id_to_edit, 1, "Генерирую текст работы...", params.total_stages))
+    content = await generate_simple_work_content(params.order_id, params.model_name, params.theme, params.work_type)
+    
+    await _update_progress(ProgressUpdateParams(params.bot, params.chat_id, params.message_id_to_edit, 2, "Формирую LaTeX документ...", params.total_stages))
+    full_tex = create_latex_document(params.theme, content, include_toc=False)
+    
+    content_pages = count_pages_in_text(content)
+    total_pages = count_total_pages_in_document(content, 0)
+    print(f"Generated simple work: {content_pages:.1f} pages of content, {total_pages:.1f} total pages")
+    
+    return full_tex
+
+
+async def _generate_large_work(params: LargeWorkGenerationParams) -> str:
+    """Генерирует большую работу с планом и оглавлением."""
+    await _update_progress(ProgressUpdateParams(params.bot, params.chat_id, params.message_id_to_edit, 1, "Составляю план работы...", params.total_stages))
+    plan = await generate_work_plan(params.order_id, params.model_name, params.theme, params.pages, params.work_type)
+
+    await _update_progress(ProgressUpdateParams(params.bot, params.chat_id, params.message_id_to_edit, 2, "Генерирую содержание по главам...", params.total_stages))
+    
+    async def content_progress_callback(description: str, progress: int):
+        stage_progress = 2 + (progress / 100)
+        await _update_progress_detailed(params.bot, params.chat_id, params.message_id_to_edit, stage_progress, description)
+    
+    content_params = WorkContentParams(
+        order_id=params.order_id,
+        model_name=params.model_name,
+        theme=params.theme,
+        pages=params.pages,
+        work_type=params.work_type,
+        plan_text=plan,
+        progress_callback=content_progress_callback
+    )
+    content = await generate_work_content_stepwise(content_params)
+    
+    try:
+        chapters = parse_work_plan(plan)
+        num_chapters = len(chapters)
+    except Exception:
+        num_chapters = 0
+    
+    content_pages = count_pages_in_text(content)
+    total_pages = count_total_pages_in_document(content, num_chapters)
+    print(f"Generated content: {content_pages:.1f} pages of content, {total_pages:.1f} total pages (target: {params.pages})")
+
+    await _update_progress(ProgressUpdateParams(params.bot, params.chat_id, params.message_id_to_edit, 3, "Формирую LaTeX документ...", params.total_stages))
+    return create_latex_document(params.theme, content, include_toc=True)
+
+
+async def _compile_and_send_files(params: CompileAndSendParams) -> None:
+    """Компилирует LaTeX в PDF/DOCX и отправляет файлы пользователю."""
+    tex_path = os.path.join(params.temp_dir, f"{params.filename}.tex")
+    
+    with open(tex_path, 'w', encoding='utf-8') as f:
+        f.write(params.full_tex)
+
+    await send_tex_file_to_admin(params.bot, params.order_id, tex_path, params.theme)
+
+    if params.pages == SMALL_WORK_PAGES:
+        current_stage = 3
+        total_stages = 5
+    else:
+        current_stage = 4
+        total_stages = 6
+    
+    await _update_progress(ProgressUpdateParams(params.bot, params.chat_id, params.message_id_to_edit, current_stage, "Компилирую PDF...", total_stages))
+    success, result = await compile_latex_to_pdf(params.full_tex, params.temp_dir, params.filename)
+    if not success:
+        raise LaTeXCompilationError(result)
+    
+    pdf_path = result
+
+    current_stage += 1
+    await _update_progress(ProgressUpdateParams(params.bot, params.chat_id, params.message_id_to_edit, current_stage, "Конвертирую в DOCX...", total_stages))
+    success, result = await convert_tex_to_docx(params.full_tex, params.temp_dir, params.filename)
+    docx_path = result if success else None
+    if not success:
+        print(f"Предупреждение: не удалось создать DOCX файл: {result}")
+
+    current_stage += 1
+    await _update_progress(ProgressUpdateParams(params.bot, params.chat_id, params.message_id_to_edit, current_stage, "Отправляю результат...", total_stages))
+    files_sent = await send_generated_files_to_user(params.bot, params.chat_id, pdf_path, docx_path, params.theme)
+
+    await params.bot.edit_message_text(
+        text=f"{READY_SYMBOL * 10}\n✅ Генерация завершена успешно!",
+        chat_id=params.chat_id,
+        message_id=params.message_id_to_edit
+    )
+    
+    final_message = f"🎉 Поздравляю! Ваша работа успешно сгенерирована!\n\n📁 Отправлено файлов: {files_sent}"
+    if docx_path is None:
+        final_message += "\n\n⚠️ DOCX файл не создан (требуется LibreOffice или Pandoc)"
+    
+    await params.bot.send_message(chat_id=params.chat_id, text=final_message)
+
+
+async def _handle_generation_error(
+    e: Exception,
+    order_id: int,
+    bot: Bot,
+    chat_id: int,
+    message_id_to_edit: int
+) -> None:
+    """Обрабатывает ошибки генерации и уведомляет пользователя и администратора."""
+    await update_order_status(order_id, 'failed')
+    
+    is_latex_error = isinstance(e, LaTeXCompilationError)
+    await send_error_log_to_admin(bot, order_id, e, is_latex_error=is_latex_error)
+    
+    if is_latex_error:
+        user_message = (
+            "⚠️ Произошла ошибка при компиляции документа.\n\n"
+            "Администратор бота уже уведомлен и скоро пришлет вам работу."
+        )
+    else:
+        user_message = (
+            "❌ Произошла ошибка во время генерации.\n\n"
+            "Администратор бота уже уведомлен и скоро пришлет вам работу."
+        )
+    
+    print(f"Error in generate_work_async: {e}")
+    if is_latex_error:
+        print(f"LaTeX compilation error details: {e.error_details}")
+    
+    try:
+        await bot.edit_message_text(
+            text=f"{READY_SYMBOL * 2}{UNREADY_SYMBOL * 8}\n❌ Ошибка генерации",
+            chat_id=chat_id,
+            message_id=message_id_to_edit
+        )
+        await bot.send_message(chat_id, user_message)
+    except Exception as send_error:
+        print(f"Failed to send error message: {send_error}")
+        with contextlib.suppress(Exception):
+            await bot.send_message(chat_id, "⚠️ Произошла ошибка. Администратор бота уже уведомлен и скоро пришлет вам работу.")
 
 
 async def generate_work_async(
@@ -56,7 +256,6 @@ async def generate_work_async(
     try:
         await update_order_status(order_id, 'generating')
         
-        # Получаем информацию о заказе
         order_info = await get_order_info(order_id)
         if not order_info:
             raise Exception("Заказ не найден в базе данных")
@@ -65,169 +264,60 @@ async def generate_work_async(
         pages = order_info['pages']
         work_type = order_info['work_type']
 
-        # Для работ 1-2 страницы используем упрощенную генерацию без плана и оглавления
-        if pages == 2:
-            total_stages = 5  # Для малых работ: 1-генерация, 2-формирование, 3-компиляция, 4-конвертация, 5-отправка
-            
-            # --- Этап 1: Генерация простой работы ---
-            await _update_progress(bot, chat_id, message_id_to_edit, 1, "Генерирую текст работы...", total_stages)
-            from core.content_generator import generate_simple_work_content
-            content = await generate_simple_work_content(order_id, model_name, theme, work_type)
-            
-            # --- Этап 2: Формирование LaTeX документа (без оглавления) ---
-            await _update_progress(bot, chat_id, message_id_to_edit, 2, "Формирую LaTeX документ...", total_stages)
-            full_tex = create_latex_document(theme, content, include_toc=False)
-            
-            content_pages = count_pages_in_text(content)
-            total_pages = count_total_pages_in_document(content, 0)  # Без глав для малых работ
-            print(f"Generated simple work: {content_pages:.1f} pages of content, {total_pages:.1f} total pages (target: {pages})")
-        else:
-            total_stages = 6  # Для больших работ: 1-план, 2-генерация, 3-формирование, 4-компиляция, 5-конвертация, 6-отправка
-            # --- Этап 1: Составление плана ---
-            await _update_progress(bot, chat_id, message_id_to_edit, 1, "Составляю план работы...", total_stages)
-            plan = await generate_work_plan(order_id, model_name, theme, pages, work_type)
-
-            # --- Этап 2: Пошаговая генерация содержания с контролем объема ---
-            await _update_progress(bot, chat_id, message_id_to_edit, 2, "Генерирую содержание по главам...", total_stages)
-            
-            # Создаем callback для обновления прогресса генерации
-            async def content_progress_callback(description: str, progress: int):
-                # Прогресс от 2 до 3 этапа (20% - 30%)
-                stage_progress = 2 + (progress / 100)
-                await _update_progress_detailed(bot, chat_id, message_id_to_edit, stage_progress, description)
-            
-            content = await generate_work_content_stepwise(
-                order_id, model_name, theme, pages, work_type, plan, content_progress_callback
+        if pages == SMALL_WORK_PAGES:
+            total_stages = 5
+            simple_params = SimpleWorkGenerationParams(
+                order_id=order_id,
+                model_name=model_name,
+                theme=theme,
+                work_type=work_type,
+                bot=bot,
+                chat_id=chat_id,
+                message_id_to_edit=message_id_to_edit,
+                total_stages=total_stages
             )
-            
-            # Подсчитываем фактическое количество страниц
-            # Парсим план для определения количества глав
-            try:
-                chapters = parse_work_plan(plan)
-                num_chapters = len(chapters)
-            except Exception:
-                num_chapters = 0
-            
-            content_pages = count_pages_in_text(content)
-            total_pages = count_total_pages_in_document(content, num_chapters)
-            print(f"Generated content: {content_pages:.1f} pages of content, {total_pages:.1f} total pages (target: {pages})")
-
-            # --- Этап 3: Формирование LaTeX документа ---
-            await _update_progress(bot, chat_id, message_id_to_edit, 3, "Формирую LaTeX документ...", total_stages)
-            full_tex = create_latex_document(theme, content, include_toc=True)
+            full_tex = await _generate_simple_work(simple_params)
+        else:
+            total_stages = 6
+            large_params = LargeWorkGenerationParams(
+                order_id=order_id,
+                model_name=model_name,
+                theme=theme,
+                pages=pages,
+                work_type=work_type,
+                bot=bot,
+                chat_id=chat_id,
+                message_id_to_edit=message_id_to_edit,
+                total_stages=total_stages
+            )
+            full_tex = await _generate_large_work(large_params)
         
-        # Сохраняем tex в БД
         await save_full_tex(order_id, full_tex)
 
-        # Создаем временную директорию и сохраняем tex файл
         temp_dir = tempfile.mkdtemp()
         filename = f"coursework_{order_id}"
-        tex_path = os.path.join(temp_dir, f"{filename}.tex")
         
-        # Записываем tex файл
-        with open(tex_path, 'w', encoding='utf-8') as f:
-            f.write(full_tex)
-
-        # Отправляем .tex файл админу для отладки (всегда, до компиляции)
-        await send_tex_file_to_admin(bot, order_id, tex_path, theme)
-
-        # Определяем номер этапа в зависимости от типа работы
-        if pages == 2:
-            # Для малых работ этапы: 1-генерация, 2-формирование, 3-компиляция, 4-конвертация, 5-отправка
-            current_stage = 3
-            total_stages = 5
-        else:
-            # Для больших работ этапы: 1-план, 2-генерация, 3-формирование, 4-компиляция, 5-конвертация, 6-отправка
-            current_stage = 4
-            total_stages = 6
-        
-        # --- Этап 4 (или 3 для малых работ): Компиляция в PDF ---
-        await _update_progress(bot, chat_id, message_id_to_edit, current_stage, "Компилирую PDF...", total_stages)
-        success, result = await compile_latex_to_pdf(full_tex, temp_dir, filename)
-        if not success:
-            raise LaTeXCompilationError(result)
-        
-        pdf_path = result
-
-        # --- Этап 5 (или 4 для малых работ): Конвертация в DOCX ---
-        current_stage += 1
-        await _update_progress(bot, chat_id, message_id_to_edit, current_stage, "Конвертирую в DOCX...", total_stages)
-        success, result = await convert_tex_to_docx(full_tex, temp_dir, filename)
-        if not success:
-            # Если конвертация не удалась, продолжаем без DOCX
-            print(f"Предупреждение: не удалось создать DOCX файл: {result}")
-            docx_path = None
-        else:
-            docx_path = result
-
-        # --- Этап 6 (или 5 для малых работ): Отправка файлов ---
-        current_stage += 1
-        await _update_progress(bot, chat_id, message_id_to_edit, current_stage, "Отправляю результат...", total_stages)
-        files_sent = await send_generated_files_to_user(bot, chat_id, pdf_path, docx_path, theme)
-
-        # Финальное сообщение
-        await bot.edit_message_text(
-            text=f"{READY_SYMBOL * 10}\n✅ Генерация завершена успешно!",
+        compile_params = CompileAndSendParams(
+            full_tex=full_tex,
+            order_id=order_id,
+            theme=theme,
+            pages=pages,
+            bot=bot,
             chat_id=chat_id,
-            message_id=message_id_to_edit
+            message_id_to_edit=message_id_to_edit,
+            temp_dir=temp_dir,
+            filename=filename
         )
-        
-        # Отправляем итоговое сообщение
-        final_message = f"🎉 Поздравляю! Ваша работа успешно сгенерирована!\n\n📁 Отправлено файлов: {files_sent}"
-        if docx_path is None:
-            final_message += "\n\n⚠️ DOCX файл не создан (требуется LibreOffice или Pandoc)"
-        
-        await bot.send_message(chat_id=chat_id, text=final_message)
+        await _compile_and_send_files(compile_params)
 
-        # --- Обновляем статус в БД ---
         await update_order_status(order_id, 'completed')
 
     except Exception as e:
-        await update_order_status(order_id, 'failed')
-        
-        # Проверяем, является ли это ошибкой компиляции LaTeX
-        is_latex_error = isinstance(e, LaTeXCompilationError)
-        
-        # Отправляем лог об ошибке админу (с полным текстом для LaTeX ошибок)
-        await send_error_log_to_admin(bot, order_id, e, is_latex_error=is_latex_error)
-        
-        # Сообщение для пользователя
-        if is_latex_error:
-            # Для ошибок компиляции LaTeX - дружелюбное сообщение
-            user_message = (
-                "⚠️ Произошла ошибка при компиляции документа.\n\n"
-                "Администратор бота уже уведомлен и скоро пришлет вам работу."
-            )
-        else:
-            # Для других ошибок - общее сообщение
-            user_message = (
-                "❌ Произошла ошибка во время генерации.\n\n"
-                "Администратор бота уже уведомлен и скоро пришлет вам работу."
-            )
-        
-        # Полная ошибка в логи
-        print(f"Error in generate_work_async: {e}")
-        if is_latex_error:
-            print(f"LaTeX compilation error details: {e.error_details}")
-        
-        try:
-            await bot.edit_message_text(
-                text=f"{READY_SYMBOL * 2}{UNREADY_SYMBOL * 8}\n❌ Ошибка генерации",
-                chat_id=chat_id,
-                message_id=message_id_to_edit
-            )
-            await bot.send_message(chat_id, user_message)
-        except Exception as send_error:
-            print(f"Failed to send error message: {send_error}")
-            # Если и короткое сообщение не отправляется, отправляем минимальное
-            with contextlib.suppress(Exception):
-                await bot.send_message(chat_id, "⚠️ Произошла ошибка. Администратор бота уже уведомлен и скоро пришлет вам работу.")
+        await _handle_generation_error(e, order_id, bot, chat_id, message_id_to_edit)
     
     finally:
-        # Очищаем историю беседы для заказа
         clear_conversation(order_id)
         
-        # Очищаем временные файлы
         if temp_dir and os.path.exists(temp_dir):
             try:
                 shutil.rmtree(temp_dir)
@@ -235,18 +325,19 @@ async def generate_work_async(
                 print(f"Failed to cleanup temp directory: {cleanup_error}")
 
 
-async def _update_progress(bot: Bot, chat_id: int, message_id: int, stage: int, description: str, total_stages: int = 6) -> None:
+async def _update_progress(params: ProgressUpdateParams) -> None:
     """
     Обновляет прогресс-бар в сообщении.
     
     Args:
-        bot: Экземпляр бота
-        chat_id: ID чата
-        message_id: ID сообщения для редактирования
-        stage: Номер текущего этапа
-        description: Описание текущего этапа
-        total_stages: Общее количество этапов (по умолчанию 6)
+        params: Параметры обновления прогресса
     """
+    bot = params.bot
+    chat_id = params.chat_id
+    message_id = params.message_id
+    stage = params.stage
+    description = params.description
+    total_stages = params.total_stages
     # Вычисляем количество символов прогресса (масштабируем к 10 символам)
     progress_symbols = int((stage / total_stages) * 10)
     progress_symbols = min(10, max(0, progress_symbols))

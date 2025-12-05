@@ -11,7 +11,7 @@ from core.test_data_generator import (
     generate_test_subsection,
     generate_test_subsections_list,
 )
-from utils.llm_logger import log_llm_request
+from utils.llm_logger import LLMLogParams, log_llm_request
 
 # Инициализируем клиента OpenRouter
 client = AsyncOpenAI(
@@ -131,7 +131,7 @@ async def ask_assistant(order_id: int, prompt: str, model_name: str) -> str:
     finally:
         # Логируем запрос и ответ
         duration_ms = (time.time() - start_time) * 1000
-        log_llm_request(
+        log_llm_request(LLMLogParams(
             order_id=order_id,
             model_name=model_name,
             prompt=prompt,
@@ -139,7 +139,7 @@ async def ask_assistant(order_id: int, prompt: str, model_name: str) -> str:
             error=error,
             duration_ms=duration_ms,
             conversation_history=conversation_history.get(order_id)
-        )
+        ))
     
     return assistant_message
 
@@ -208,7 +208,7 @@ def _generate_test_response(order_id: int, prompt: str) -> str:
         )
     
     # Логируем тестовый запрос (но не как реальный запрос к LLM)
-    log_llm_request(
+    log_llm_request(LLMLogParams(
         order_id=order_id,
         model_name=TEST_MODEL_NAME,
         prompt=prompt,
@@ -216,7 +216,7 @@ def _generate_test_response(order_id: int, prompt: str) -> str:
         error=None,
         duration_ms=0,
         conversation_history=None
-    )
+    ))
     
     return response
 

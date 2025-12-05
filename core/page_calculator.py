@@ -93,6 +93,53 @@ def remove_latex_commands(text: str) -> str:
     return text.strip()
 
 
+def _parse_chapter_title(line: str) -> str | None:
+    """Парсит название главы из строки. Возвращает название или None если это не глава."""
+    chapter_patterns = [
+        (r'^(\d+)\.\s*(.+)$', 2),
+        (r'^Глава\s*(\d+)\.?\s*(.+)$', 2),
+        (r'^(\d+)\)\s*(.+)$', 2),
+        (r'^[IVX]+\.\s*(.+)$', 1),
+    ]
+    
+    for pattern, title_group in chapter_patterns:
+        match = re.match(pattern, line, re.IGNORECASE)
+        if match:
+            try:
+                if match.lastindex and title_group <= match.lastindex:
+                    return match.group(title_group).strip()
+                return re.sub(r'^[\d\w\.\)\s]+', '', line).strip()
+            except (IndexError, AttributeError):
+                return re.sub(r'^[\d\w\.\)\s]+', '', line).strip()
+    
+    return None
+
+
+def _parse_subsection_title(line: str) -> str | None:
+    """Парсит название подраздела из строки. Возвращает название или None если это не подраздел."""
+    subsection_patterns = [
+        r'^(\d+\.\d+)\s*(.+)$',
+        r'^-\s*(.+)$',
+        r'^\*\s*(.+)$',
+    ]
+    
+    for pattern in subsection_patterns:
+        match = re.match(pattern, line)
+        if match:
+            try:
+                if match.lastindex:
+                    subsection_title = match.group(match.lastindex).strip()
+                else:
+                    subsection_title = re.sub(r'^[-\*\d\.\s]+', '', line).strip()
+                
+                return subsection_title if subsection_title else None
+            except (IndexError, AttributeError):
+                subsection_title = re.sub(r'^[-\*\d\.\s]+', '', line).strip()
+                return subsection_title if subsection_title else None
+    
+    return None
+
+
 def parse_work_plan(plan_text: str) -> list[dict[str, str]]:
     """
     Парсит план работы и извлекает структуру глав.
@@ -105,77 +152,29 @@ def parse_work_plan(plan_text: str) -> list[dict[str, str]]:
     """
     chapters = []
     lines = plan_text.split('\n')
-    
     current_chapter = None
     
     for line in lines:
         line = line.strip()
         if not line:
             continue
-            
-        # Ищем главы (различные форматы)
-        chapter_patterns = [
-            (r'^(\d+)\.\s*(.+)$', 2),  # "1. Введение" - название во 2-й группе
-            (r'^Глава\s*(\d+)\.?\s*(.+)$', 2),  # "Глава 1. Название" - название во 2-й группе
-            (r'^(\d+)\)\s*(.+)$', 2),  # "1) Введение" - название во 2-й группе
-            (r'^[IVX]+\.\s*(.+)$', 1),  # "I. Введение" - название в 1-й группе
-        ]
         
-        chapter_found = False
-        for pattern, title_group in chapter_patterns:
-            match = re.match(pattern, line, re.IGNORECASE)
-            if match:
-                if current_chapter:
-                    chapters.append(current_chapter)
-                
-                try:
-                    # Проверяем, что группа существует
-                    if match.lastindex and title_group <= match.lastindex:
-                        chapter_title = match.group(title_group).strip()
-                    else:
-                        # Если группа не найдена, берем всю строку без номера
-                        chapter_title = re.sub(r'^[\d\w\.\)\s]+', '', line).strip()
-                except (IndexError, AttributeError):
-                    # Если группа не найдена, берем всю строку без номера
-                    chapter_title = re.sub(r'^[\d\w\.\)\s]+', '', line).strip()
-                
-                current_chapter = {
-                    'title': chapter_title,
-                    'subsections': []
-                }
-                chapter_found = True
-                break
-        
-        # Если не нашли главу, ищем подразделы
-        if not chapter_found and current_chapter:
-            subsection_patterns = [
-                r'^(\d+\.\d+)\s*(.+)$',  # "1.1 Подраздел"
-                r'^-\s*(.+)$',  # "- Подраздел"
-                r'^\*\s*(.+)$',  # "* Подраздел"
-            ]
+        chapter_title = _parse_chapter_title(line)
+        if chapter_title:
+            if current_chapter:
+                chapters.append(current_chapter)
             
-            for pattern in subsection_patterns:
-                match = re.match(pattern, line)
-                if match:
-                    try:
-                        # Проверяем, что есть группы в совпадении
-                        if match.lastindex:
-                            # Используем последнюю группу
-                            subsection_title = match.group(match.lastindex).strip()
-                        else:
-                            # Если групп нет, берем всю строку после префикса
-                            subsection_title = re.sub(r'^[-\*\d\.\s]+', '', line).strip()
-                        
-                        if subsection_title:
-                            current_chapter['subsections'].append(subsection_title)
-                    except (IndexError, AttributeError):
-                        # Пытаемся извлечь подраздел другим способом
-                        subsection_title = re.sub(r'^[-\*\d\.\s]+', '', line).strip()
-                        if subsection_title:
-                            current_chapter['subsections'].append(subsection_title)
-                    break
+            current_chapter = {
+                'title': chapter_title,
+                'subsections': []
+            }
+            continue
+        
+        if current_chapter:
+            subsection_title = _parse_subsection_title(line)
+            if subsection_title:
+                current_chapter['subsections'].append(subsection_title)
     
-    # Добавляем последнюю главу
     if current_chapter:
         chapters.append(current_chapter)
     

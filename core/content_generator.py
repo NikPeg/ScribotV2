@@ -2,6 +2,9 @@
 Модуль для генерации содержания работ через GPT с контролем объема.
 """
 
+from collections.abc import Callable
+from dataclasses import dataclass
+
 from core.page_calculator import (
     calculate_content_pages_for_target,
     calculate_pages_per_chapter,
@@ -10,6 +13,64 @@ from core.page_calculator import (
     should_generate_subsections,
 )
 from gpt.assistant import ask_assistant
+
+
+@dataclass
+class WorkContentParams:
+    """Параметры для генерации содержания работы."""
+    order_id: int
+    model_name: str
+    theme: str
+    pages: int
+    work_type: str
+    plan_text: str
+    progress_callback: Callable | None = None
+
+
+@dataclass
+class ChapterContentParams:
+    """Параметры для генерации содержания главы."""
+    order_id: int
+    model_name: str
+    chapter_title: str
+    theme: str
+    target_pages: float
+    work_type: str
+
+
+@dataclass
+class SubsectionsContentParams:
+    """Параметры для генерации содержания подразделов."""
+    order_id: int
+    model_name: str
+    chapter_title: str
+    subsections: list[str]
+    target_pages: float
+    theme: str
+
+
+@dataclass
+class MainChaptersGenerationParams:
+    """Параметры для генерации основных глав."""
+    main_chapters: list[dict]
+    order_id: int
+    model_name: str
+    theme: str
+    work_type: str
+    pages_per_chapter: dict[str, float]
+    content_target_pages: float
+    progress_callback: Callable | None = None
+
+
+@dataclass
+class BibliographyGenerationParams:
+    """Параметры для генерации библиографии."""
+    bibliography_chapter: dict | None
+    order_id: int
+    model_name: str
+    theme: str
+    work_type: str
+    progress_callback: Callable | None = None
 
 
 async def generate_work_plan(order_id: int, model_name: str, theme: str, pages: int, work_type: str) -> str:
@@ -47,42 +108,8 @@ async def generate_work_plan(order_id: int, model_name: str, theme: str, pages: 
     return await ask_assistant(order_id, plan_prompt, model_name)
 
 
-async def generate_work_content_stepwise(
-    order_id: int,
-    model_name: str,
-    theme: str,
-    pages: int,
-    work_type: str,
-    plan_text: str,
-    progress_callback=None
-) -> str:
-    """
-    Генерирует содержание работы пошагово с контролем объема.
-    
-    Args:
-        order_id: ID заказа
-        model_name: Название модели GPT
-        theme: Тема работы
-        pages: Количество страниц
-        work_type: Тип работы
-        plan_text: Текст плана работы
-        progress_callback: Функция для обновления прогресса
-    
-    Returns:
-        Полное содержание работы в формате LaTeX
-    """
-    # Парсим план работы
-    try:
-        chapters = parse_work_plan(plan_text)
-    except Exception:
-        # Fallback к старому методу если план не распарсился
-        return await generate_full_work_content_legacy(order_id, model_name, theme, pages, work_type)
-    
-    if not chapters:
-        # Fallback к старому методу если план не распарсился
-        return await generate_full_work_content_legacy(order_id, model_name, theme, pages, work_type)
-    
-    # Разделяем главы на основные и список источников
+def _split_chapters(chapters: list[dict]) -> tuple[list[dict], dict | None]:
+    """Разделяет главы на основные и библиографию."""
     main_chapters = []
     bibliography_chapter = None
     
@@ -92,96 +119,149 @@ async def generate_work_content_stepwise(
         else:
             main_chapters.append(chapter)
     
-    # Рассчитываем, сколько страниц содержания нужно сгенерировать
-    # Учитываем, что титульный лист и оглавление займут ~1.5-2 страницы
-    content_target_pages = calculate_content_pages_for_target(pages, len(main_chapters))
-    
-    # Рассчитываем страницы для основных глав (исключая список источников)
-    # Резервируем 0.5 стр для списка источников
-    pages_per_chapter = calculate_pages_per_chapter(content_target_pages - 0.5, main_chapters)
-    
+    return main_chapters, bibliography_chapter
+
+
+async def _generate_main_chapters(params: MainChaptersGenerationParams) -> str:
+    """Генерирует содержание основных глав."""
     full_content = ""
     total_pages_generated = 0.0
     
-    # Генерируем основные главы
-    for i, chapter in enumerate(main_chapters):
+    for i, chapter in enumerate(params.main_chapters):
         chapter_title = chapter['title']
-        target_pages = pages_per_chapter.get(chapter_title, 2.0)
+        target_pages = params.pages_per_chapter.get(chapter_title, 2.0)
         
-        if progress_callback:
-            progress = int((i / len(main_chapters)) * 90)  # 90% для основных глав
-            await progress_callback(f"Генерирую главу: {chapter_title[:50]}...", progress)
+        if params.progress_callback:
+            progress = int((i / len(params.main_chapters)) * 90)
+            await params.progress_callback(f"Генерирую главу: {chapter_title[:50]}...", progress)
         
-        # Генерируем основное содержание главы
-        chapter_content = await generate_chapter_content(
-            order_id, model_name, chapter_title, theme, target_pages, work_type
+        chapter_params = ChapterContentParams(
+            order_id=params.order_id,
+            model_name=params.model_name,
+            chapter_title=chapter_title,
+            theme=params.theme,
+            target_pages=target_pages,
+            work_type=params.work_type
         )
+        chapter_content = await generate_chapter_content(chapter_params)
         
         current_chapter_pages = count_pages_in_text(chapter_content)
-        subsections_content = ""
         
-        # Если страниц недостаточно, генерируем подразделы
         if should_generate_subsections(current_chapter_pages, target_pages):
-            subsections_content = await generate_subsections_content(
-                order_id, model_name, chapter_title, chapter['subsections'],
-                target_pages - current_chapter_pages, theme
+            subsections_params = SubsectionsContentParams(
+                order_id=params.order_id,
+                model_name=params.model_name,
+                chapter_title=chapter_title,
+                subsections=chapter['subsections'],
+                target_pages=target_pages - current_chapter_pages,
+                theme=params.theme
             )
+            subsections_content = await generate_subsections_content(subsections_params)
             chapter_content += "\n\n" + subsections_content
             current_chapter_pages = count_pages_in_text(chapter_content)
         
-        # Добавляем главу к общему содержанию
         full_content += chapter_content + "\n\n\\newpage\n\n"
         total_pages_generated += current_chapter_pages
         
-        # Проверяем, не превысили ли общий объем содержания
-        # Учитываем, что в полном документе будет еще титульный лист и оглавление
-        if total_pages_generated >= content_target_pages * 1.15:  # Допускаем 15% превышение
+        if total_pages_generated >= params.content_target_pages * 1.15:
             break
     
-    # Всегда добавляем список источников в конце
-    if bibliography_chapter:
-        if progress_callback:
-            await progress_callback("Генерирую список источников...", 95)
-        
-        bibliography_content = await generate_chapter_content(
-            order_id, model_name, bibliography_chapter['title'], theme, 0.5, work_type
-        )
-        full_content += bibliography_content
-    else:
-        # Если список источников не был в плане, создаем его
-        if progress_callback:
-            await progress_callback("Генерирую список источников...", 95)
-        
-        bibliography_content = await generate_chapter_content(
-            order_id, model_name, "Список использованных источников", theme, 0.5, work_type
-        )
-        full_content += bibliography_content
+    return full_content
+
+
+async def _generate_bibliography(params: BibliographyGenerationParams) -> str:
+    """Генерирует список источников."""
+    if params.progress_callback:
+        await params.progress_callback("Генерирую список источников...", 95)
     
-    return full_content.strip()
+    chapter_title = (
+        params.bibliography_chapter['title'] if params.bibliography_chapter
+        else "Список использованных источников"
+    )
+    
+    bibliography_params = ChapterContentParams(
+        order_id=params.order_id,
+        model_name=params.model_name,
+        chapter_title=chapter_title,
+        theme=params.theme,
+        target_pages=0.5,
+        work_type=params.work_type
+    )
+    return await generate_chapter_content(bibliography_params)
 
 
-async def generate_chapter_content(
-    order_id: int,
-    model_name: str,
-    chapter_title: str,
-    theme: str,
-    target_pages: float,
-    work_type: str
-) -> str:
+async def generate_work_content_stepwise(params: WorkContentParams) -> str:
+    """
+    Генерирует содержание работы пошагово с контролем объема.
+    
+    Args:
+        params: Параметры генерации содержания работы
+    
+    Returns:
+        Полное содержание работы в формате LaTeX
+    """
+    order_id = params.order_id
+    model_name = params.model_name
+    theme = params.theme
+    pages = params.pages
+    work_type = params.work_type
+    plan_text = params.plan_text
+    progress_callback = params.progress_callback
+    
+    try:
+        chapters = parse_work_plan(plan_text)
+    except Exception:
+        return await generate_full_work_content_legacy(order_id, model_name, theme, pages, work_type)
+    
+    if not chapters:
+        return await generate_full_work_content_legacy(order_id, model_name, theme, pages, work_type)
+    
+    main_chapters, bibliography_chapter = _split_chapters(chapters)
+    
+    content_target_pages = calculate_content_pages_for_target(pages, len(main_chapters))
+    pages_per_chapter = calculate_pages_per_chapter(content_target_pages - 0.5, main_chapters)
+    
+    main_chapters_params = MainChaptersGenerationParams(
+        main_chapters=main_chapters,
+        order_id=order_id,
+        model_name=model_name,
+        theme=theme,
+        work_type=work_type,
+        pages_per_chapter=pages_per_chapter,
+        content_target_pages=content_target_pages,
+        progress_callback=progress_callback
+    )
+    main_content = await _generate_main_chapters(main_chapters_params)
+    
+    bibliography_params = BibliographyGenerationParams(
+        bibliography_chapter=bibliography_chapter,
+        order_id=order_id,
+        model_name=model_name,
+        theme=theme,
+        work_type=work_type,
+        progress_callback=progress_callback
+    )
+    bibliography_content = await _generate_bibliography(bibliography_params)
+    
+    return (main_content + bibliography_content).strip()
+
+
+async def generate_chapter_content(params: ChapterContentParams) -> str:
     """
     Генерирует содержание одной главы.
     
     Args:
-        order_id: ID заказа
-        model_name: Название модели GPT
-        chapter_title: Название главы
-        theme: Тема работы
-        target_pages: Целевое количество страниц
-        work_type: Тип работы
+        params: Параметры генерации содержания главы
     
     Returns:
         Содержание главы в формате LaTeX
     """
+    order_id = params.order_id
+    model_name = params.model_name
+    chapter_title = params.chapter_title
+    theme = params.theme
+    target_pages = params.target_pages
+    work_type = params.work_type
     # Определяем тип главы для специальной обработки
     title_lower = chapter_title.lower()
     
@@ -263,28 +343,22 @@ async def generate_chapter_content(
     return await ask_assistant(order_id, prompt, model_name)
 
 
-async def generate_subsections_content(
-    order_id: int,
-    model_name: str,
-    chapter_title: str,
-    subsections: list[str],
-    target_pages: float,
-    theme: str
-) -> str:
+async def generate_subsections_content(params: SubsectionsContentParams) -> str:
     """
     Генерирует содержание подразделов для увеличения объема главы.
     
     Args:
-        order_id: ID заказа
-        model_name: Название модели GPT
-        chapter_title: Название главы
-        subsections: Список подразделов
-        target_pages: Сколько страниц нужно добавить
-        theme: Тема работы
+        params: Параметры генерации содержания подразделов
     
     Returns:
         Содержание подразделов в формате LaTeX
     """
+    order_id = params.order_id
+    model_name = params.model_name
+    chapter_title = params.chapter_title
+    subsections = params.subsections
+    target_pages = params.target_pages
+    theme = params.theme
     if not subsections:
         # Если подразделы не указаны, просим GPT их придумать
         subsections_prompt = f"""

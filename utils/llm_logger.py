@@ -5,8 +5,21 @@
 
 import json
 import os
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
+
+
+@dataclass
+class LLMLogParams:
+    """Параметры для логирования запроса к LLM."""
+    order_id: int
+    model_name: str
+    prompt: str
+    response: str
+    error: str | None = None
+    duration_ms: float | None = None
+    conversation_history: list | None = None
 
 # Директория для логов (будет монтироваться как volume)
 LOG_DIR = os.getenv('LLM_LOG_DIR', './logs')
@@ -60,20 +73,20 @@ def clean_old_logs():
         print(f"Ошибка при очистке старых логов: {e}")
 
 
-def log_llm_request(order_id: int, model_name: str, prompt: str, response: str,
-                   error: str | None = None, duration_ms: float | None = None, conversation_history: list | None = None):
+def log_llm_request(params: LLMLogParams) -> None:
     """
     Логирует запрос к LLM и ответ.
     
     Args:
-        order_id: ID заказа
-        model_name: Название модели
-        prompt: Текст запроса
-        response: Ответ модели (или None при ошибке)
-        error: Текст ошибки (если была)
-        duration_ms: Длительность запроса в миллисекундах
-        conversation_history: Полная история беседы (опционально, для контекста)
+        params: Параметры логирования запроса к LLM
     """
+    order_id = params.order_id
+    model_name = params.model_name
+    prompt = params.prompt
+    response = params.response
+    error = params.error
+    duration_ms = params.duration_ms
+    conversation_history = params.conversation_history
     try:
         ensure_log_dir()
         clean_old_logs()  # Периодически очищаем старые логи
