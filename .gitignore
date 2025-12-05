@@ -172,3 +172,14 @@ tmp/
 # Generated files
 generated_works/
 output/logs/
+
+# Secrets and credentials
+deployment/GITHUB_SECRETS.txt
+deployment/add_ssh_key.sh
+*.pem
+*.key
+!*.pub
+*_private_key*
+*_secret*
+*credentials*.json
+*service-account*.json
