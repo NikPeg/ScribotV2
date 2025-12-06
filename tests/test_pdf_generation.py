@@ -14,8 +14,8 @@ import unittest
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, project_root)
 
-from gpt.assistant import TEST_MODEL_NAME  # noqa: E402
-from scripts.generate import generate_test_work  # noqa: E402
+from gpt.assistant import TEST_MODEL_NAME
+from scripts.generate import generate_test_work
 
 # Константы для тестов
 EXPECTED_PDF_PAGES = 426  # Ожидаемое количество страниц в тестовом режиме

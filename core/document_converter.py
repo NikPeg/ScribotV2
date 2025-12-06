@@ -10,7 +10,6 @@ import re
 import qrcode
 from pypdf import PdfReader, PdfWriter
 from reportlab.lib.pagesizes import A4
-from reportlab.lib.units import mm
 from reportlab.pdfgen import canvas
 
 # Константы
@@ -360,7 +359,7 @@ def _create_qr_code_pdf_page(payment_url: str, user_id: int, temp_dir: str) -> s
     return pdf_path
 
 
-async def create_partial_pdf_with_qr(  # noqa: PLR0913
+async def create_partial_pdf_with_qr(
     full_pdf_path: str,
     payment_url: str,
     user_id: int,

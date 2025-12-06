@@ -15,12 +15,12 @@ import unittest
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, project_root)
 
-from core.document_converter import (  # noqa: E402
+from core.document_converter import (
     compile_latex_to_pdf,
     create_partial_pdf_with_qr,
 )
-from gpt.assistant import TEST_MODEL_NAME  # noqa: E402
-from scripts.generate import generate_test_work  # noqa: E402
+from gpt.assistant import TEST_MODEL_NAME
+from scripts.generate import generate_test_work
 
 
 def check_latex_available() -> bool:
