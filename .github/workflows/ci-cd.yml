@@ -84,22 +84,17 @@ jobs:
       
       - name: Login to Yandex Container Registry
         run: |
-          # Сохраняем JSON ключ во временный файл
           echo '${{ secrets.YC_SA_JSON_CREDENTIALS }}' > /tmp/key.json
-          # Логинимся используя docker
           cat /tmp/key.json | docker login \
             --username json_key \
             --password-stdin \
             cr.yandex/${{ secrets.YC_REGISTRY_ID }}
-          # Удаляем временный файл
           rm /tmp/key.json
       
       - name: Build and push Docker image
         run: |
           IMAGE_TAG="${{ env.REGISTRY }}/${{ secrets.YC_REGISTRY_ID }}/${{ env.IMAGE_NAME }}"
-          # Собираем образ
           docker build -t ${IMAGE_TAG}:latest -t ${IMAGE_TAG}:${{ github.sha }} -f deployment/Dockerfile .
-          # Пушим оба тега
           docker push ${IMAGE_TAG}:latest
           docker push ${IMAGE_TAG}:${{ github.sha }}
 
@@ -111,14 +106,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: Copy docker-compose.prod.yml to server
+      - name: Copy files to server
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.YC_INSTANCE_IP }}
           username: ${{ secrets.YC_INSTANCE_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: "deployment/docker-compose.prod.yml"
-          target: "~/ScribotV2/deployment/"
+          source: "deployment/docker-compose.prod.yml,deployment/deploy.sh"
+          target: "~/ScribotV2/"
+          strip_components: 0
       
       - name: Deploy to server via SSH
         uses: appleboy/ssh-action@v1.0.3
@@ -132,475 +128,18 @@ jobs:
           REQUIRED_CHANNELS: ${{ secrets.REQUIRED_CHANNELS || '' }}
           LLM_TOKEN: ${{ secrets.LLM_TOKEN }}
           YC_REGISTRY_ID: ${{ secrets.YC_REGISTRY_ID }}
+          YC_SA_JSON_CREDENTIALS: ${{ secrets.YC_SA_JSON_CREDENTIALS }}
           NEW_IMAGE: ${{ env.REGISTRY }}/${{ secrets.YC_REGISTRY_ID }}/${{ env.IMAGE_NAME }}:latest
           BACKUP_IMAGE: ${{ env.REGISTRY }}/${{ secrets.YC_REGISTRY_ID }}/${{ env.IMAGE_NAME }}:stable
         with:
           host: ${{ secrets.YC_INSTANCE_IP }}
           username: ${{ secrets.YC_INSTANCE_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: BOT_TOKEN,CHAT_URL,FEEDBACK_URL,SOS_URL,ADMIN_ID,LOG_LEVEL,REQUIRED_CHANNELS,LLM_TOKEN,YC_REGISTRY_ID,NEW_IMAGE,BACKUP_IMAGE
+          envs: BOT_TOKEN,CHAT_URL,FEEDBACK_URL,SOS_URL,ADMIN_ID,LOG_LEVEL,REQUIRED_CHANNELS,LLM_TOKEN,YC_REGISTRY_ID,YC_SA_JSON_CREDENTIALS,NEW_IMAGE,BACKUP_IMAGE
           script: |
-            set -e  # Остановка при ошибке
-            
-            echo "🔄 Начинаем деплой..."
-            
-            # Создаем директории если их нет
-            export DEPLOY_DIR="$HOME/ScribotV2"
-            export DEPLOYMENT_DIR="$DEPLOY_DIR/deployment"
-            mkdir -p "$DEPLOY_DIR/data" "$DEPLOY_DIR/logs" "$DEPLOYMENT_DIR"
-            echo "📁 Директория деплоя: $DEPLOY_DIR"
-            echo "📁 Директория deployment: $DEPLOYMENT_DIR"
-            
-            # Проверяем наличие docker-compose.prod.yml после копирования
-            if [ ! -f "$DEPLOYMENT_DIR/docker-compose.prod.yml" ]; then
-              echo "⚠️  Файл docker-compose.prod.yml не найден, проверяем директорию..."
-              ls -la "$DEPLOYMENT_DIR" || true
-              echo "Попытка найти файл..."
-              find "$HOME" -name "docker-compose.prod.yml" -type f 2>/dev/null || true
-              echo "❌ Ошибка: docker-compose.prod.yml не найден как файл!"
-              exit 1
-            else
-              echo "✅ Файл docker-compose.prod.yml найден в $DEPLOYMENT_DIR"
-            fi
-            
-            # Логинимся в Yandex Container Registry
-            echo "🔐 Логинимся в Yandex Container Registry..."
-            echo '${{ secrets.YC_SA_JSON_CREDENTIALS }}' > /tmp/key.json
-            cat /tmp/key.json | sudo docker login \
-              --username json_key \
-              --password-stdin \
-              cr.yandex/${{ secrets.YC_REGISTRY_ID }}
-            rm /tmp/key.json
-            
-            # Сохраняем информацию о текущем работающем контейнере
-            CURRENT_IMAGE=""
-            if sudo docker ps --filter name=scribot_bot --format "{{.Image}}" | grep -q .; then
-              CURRENT_IMAGE=$(sudo docker ps --filter name=scribot_bot --format "{{.Image}}")
-              echo "📸 Текущий образ: $CURRENT_IMAGE"
-              # Тегируем текущий образ как stable (резервная копия)
-              sudo docker tag "$CURRENT_IMAGE" "$BACKUP_IMAGE" || echo "⚠️  Не удалось создать backup тег"
-            else
-              echo "⚠️  Текущий контейнер не найден"
-            fi
-            
-            # Обновляем новый образ
-            echo "⬇️  Скачиваем новый образ..."
-            sudo docker pull "$NEW_IMAGE"
-            
-            # Останавливаем и удаляем текущий контейнер
-            echo "⏸️  Останавливаем текущий контейнер..."
-            
-            # Сначала пытаемся остановить через docker-compose, если он запущен через него
-            # Проверяем оба файла: prod и обычный (на случай если старый контейнер запущен через docker-compose.yml)
-            if [ -f "$DEPLOYMENT_DIR/docker-compose.prod.yml" ]; then
-              echo "🛑 Останавливаем через docker-compose.prod.yml..."
-              cd "$DEPLOYMENT_DIR" || true
-              # Останавливаем и удаляем контейнеры через docker-compose (более агрессивно)
-              sudo docker-compose -f docker-compose.prod.yml down --remove-orphans --timeout 30 2>/dev/null || true
-              sleep 3
-              # Дополнительно проверяем и удаляем, если что-то осталось
-              sudo docker-compose -f docker-compose.prod.yml rm -f 2>/dev/null || true
-              sleep 2
-            fi
-            
-            # Также проверяем старый docker-compose.yml (на случай если контейнер был запущен через него)
-            if [ -f "$DEPLOYMENT_DIR/docker-compose.yml" ]; then
-              echo "🛑 Останавливаем через docker-compose.yml (старый файл)..."
-              cd "$DEPLOYMENT_DIR" || true
-              sudo docker-compose -f docker-compose.yml down --remove-orphans --timeout 10 2>/dev/null || true
-              sleep 2
-            fi
-            
-            # Получаем ID всех контейнеров с именем scribot_bot (включая остановленные)
-            CONTAINER_IDS=$(sudo docker ps -a --filter name=scribot_bot --format "{{.ID}}" || true)
-            
-            if [ -n "$CONTAINER_IDS" ]; then
-              echo "🗑️  Найдены контейнеры для удаления: $CONTAINER_IDS"
-              for CONTAINER_ID in $CONTAINER_IDS; do
-                echo ""
-                echo "  ========== Обработка контейнера $CONTAINER_ID =========="
-                
-                # Отключаем автоперезапуск перед остановкой
-                echo "  [1/4] Отключаем автоперезапуск..."
-                if sudo docker update --restart=no "$CONTAINER_ID"; then
-                  echo "       ✅ restart=no установлен"
-                else
-                  echo "       ⚠️ Не удалось установить restart=no (код: $?)"
-                fi
-                
-                # Пытаемся остановить контейнер с таймаутом
-                echo "  [2/4] Останавливаем (docker stop --timeout 10)..."
-                if sudo docker stop --timeout 10 "$CONTAINER_ID"; then
-                  echo "       ✅ docker stop успешен"
-                else
-                  echo "       ⚠️ docker stop не удался (код: $?)"
-                fi
-                sleep 2
-                
-                # Проверяем статус
-                CONTAINER_STATUS=$(sudo docker inspect "$CONTAINER_ID" --format '{{.State.Status}}' 2>/dev/null || echo "unknown")
-                echo "       Статус после stop: $CONTAINER_STATUS"
-                
-                # Если контейнер все еще работает, используем docker kill (более агрессивно)
-                if [ "$CONTAINER_STATUS" = "running" ]; then
-                  echo "  [3/4] Контейнер всё ещё running, используем docker kill..."
-                  if sudo docker kill "$CONTAINER_ID"; then
-                    echo "       ✅ docker kill успешен"
-                  else
-                    echo "       ⚠️ docker kill не удался (код: $?)"
-                  fi
-                  sleep 2
-                else
-                  echo "  [3/4] docker kill не нужен (статус: $CONTAINER_STATUS)"
-                fi
-                
-                # Удаляем контейнер
-                echo "  [4/4] Удаляем контейнер (docker rm -f)..."
-                if sudo docker rm -f "$CONTAINER_ID"; then
-                  echo "       ✅ docker rm -f успешен"
-                else
-                  echo "       ❌ docker rm -f НЕ УДАЛСЯ (код: $?)"
-                fi
-                sleep 1
-              done
-              sleep 3
-            fi
-            
-            # Финальная проверка и экстренные меры
-            if sudo docker ps -a --filter name=scribot_bot --format "{{.Names}}" | grep -q scribot_bot; then
-              echo ""
-              echo "⚠️  ========== ЭКСТРЕННЫЕ МЕРЫ =========="
-              echo "Контейнер всё ещё существует после стандартной процедуры!"
-              
-              # Показываем текущее состояние
-              echo "📊 Текущее состояние контейнера:"
-              sudo docker ps -a --filter name=scribot_bot
-              
-              REMAINING_IDS=$(sudo docker ps -a --filter name=scribot_bot --format "{{.ID}}")
-              for CONTAINER_ID in $REMAINING_IDS; do
-                echo ""
-                echo "  🔧 Экстренная обработка контейнера $CONTAINER_ID..."
-                
-                # Отключаем автоперезапуск
-                echo "  [E1] docker update --restart=no..."
-                sudo docker update --restart=no "$CONTAINER_ID" || echo "       ⚠️ Код: $?"
-                
-                # Используем docker kill (более агрессивно чем stop)
-                echo "  [E2] docker kill..."
-                if sudo docker kill "$CONTAINER_ID"; then
-                  echo "       ✅ docker kill успешен"
-                else
-                  echo "       ⚠️ docker kill: код $?"
-                fi
-                sleep 2
-                
-                # Проверяем статус
-                CONTAINER_STATUS=$(sudo docker inspect "$CONTAINER_ID" --format '{{.State.Status}}' 2>/dev/null || echo "removed")
-                echo "       Статус после kill: $CONTAINER_STATUS"
-                
-                # Пытаемся остановить еще раз
-                echo "  [E3] docker stop --timeout 5..."
-                sudo docker stop --timeout 5 "$CONTAINER_ID" || echo "       ⚠️ Код: $?"
-                sleep 2
-                
-                # Принудительное удаление
-                echo "  [E4] docker rm -f..."
-                if sudo docker rm -f "$CONTAINER_ID"; then
-                  echo "       ✅ docker rm -f успешен"
-                else
-                  echo "       ❌ docker rm -f: код $?"
-                fi
-                sleep 2
-              done
-              
-              # Финальная-финальная проверка
-              if sudo docker ps -a --filter name=scribot_bot --format "{{.Names}}" | grep -q scribot_bot; then
-                echo "❌ Контейнер-зомби все еще существует! Убиваем через PID..."
-                
-                # Получаем PID и убиваем процесс напрямую (это работает когда docker daemon не может)
-                ZOMBIE_IDS=$(sudo docker ps -a --filter name=scribot_bot --format "{{.ID}}")
-                for ZOMBIE_ID in $ZOMBIE_IDS; do
-                  echo "  🔪 Получаем PID контейнера $ZOMBIE_ID..."
-                  CONTAINER_PID=$(sudo docker inspect "$ZOMBIE_ID" --format '{{.State.Pid}}' 2>/dev/null || echo "0")
-                  
-                  if [ "$CONTAINER_PID" != "0" ] && [ -n "$CONTAINER_PID" ]; then
-                    echo "  💀 Убиваем процесс $CONTAINER_PID через kill -9..."
-                    if sudo kill -9 "$CONTAINER_PID"; then
-                      echo "  ✅ kill -9 выполнен успешно"
-                    else
-                      echo "  ❌ kill -9 FAILED! Exit code: $?"
-                    fi
-                    sleep 3
-                    
-                    # Проверяем, жив ли процесс
-                    if ps -p "$CONTAINER_PID" > /dev/null 2>&1; then
-                      echo "  ⚠️  Процесс $CONTAINER_PID всё ещё жив!"
-                    else
-                      echo "  ✅ Процесс $CONTAINER_PID убит"
-                    fi
-                  else
-                    echo "  ⚠️  PID контейнера: $CONTAINER_PID (невалидный или 0)"
-                  fi
-                  
-                  # Пробуем удалить контейнер после убийства процесса
-                  echo "  🗑️  Удаляем контейнер $ZOMBIE_ID..."
-                  if sudo docker rm -f "$ZOMBIE_ID"; then
-                    echo "  ✅ docker rm -f выполнен успешно"
-                  else
-                    echo "  ❌ docker rm -f FAILED! Exit code: $?"
-                  fi
-                  sleep 1
-                done
-                
-                # Ещё одна проверка
-                if sudo docker ps -a --filter name=scribot_bot --format "{{.Names}}" | grep -q scribot_bot; then
-                  echo "⚠️  Контейнер всё ещё существует после kill -9, пробуем перезапуск Docker..."
-                  
-                  # Показываем состояние контейнера
-                  echo "📊 Состояние контейнера перед перезапуском Docker:"
-                  sudo docker inspect scribot_bot --format 'Status: {{.State.Status}}, Pid: {{.State.Pid}}, Running: {{.State.Running}}' || true
-                  
-                  # Перезапуск Docker daemon как последнее средство
-                  echo "  🔄 Перезапускаем Docker daemon..."
-                  if sudo systemctl restart docker; then
-                    echo "  ✅ Docker daemon перезапущен через systemctl"
-                  elif sudo service docker restart; then
-                    echo "  ✅ Docker daemon перезапущен через service"
-                  else
-                    echo "  ❌ Не удалось перезапустить Docker daemon!"
-                  fi
-                  sleep 10
-                  
-                  # После перезапуска Docker нужно заново залогиниться в registry
-                  echo "  🔐 Повторный логин в Yandex Container Registry..."
-                  echo '${{ secrets.YC_SA_JSON_CREDENTIALS }}' > /tmp/key.json
-                  cat /tmp/key.json | sudo docker login --username json_key --password-stdin cr.yandex/${{ secrets.YC_REGISTRY_ID }} || echo "⚠️ Не удалось залогиниться"
-                  rm -f /tmp/key.json
-                  
-                  # Финальная попытка удаления
-                  echo "  🗑️  Финальная попытка удаления после перезапуска Docker..."
-                  FINAL_IDS=$(sudo docker ps -a --filter name=scribot_bot --format "{{.ID}}")
-                  for FINAL_ID in $FINAL_IDS; do
-                    echo "  Удаляем $FINAL_ID..."
-                    if sudo docker rm -f "$FINAL_ID"; then
-                      echo "  ✅ Контейнер $FINAL_ID удалён"
-                    else
-                      echo "  ❌ Не удалось удалить $FINAL_ID"
-                    fi
-                  done
-                  sleep 2
-                  
-                  # Абсолютно финальная проверка
-                  if sudo docker ps -a --filter name=scribot_bot --format "{{.Names}}" | grep -q scribot_bot; then
-                    echo "❌ НЕВОЗМОЖНО УДАЛИТЬ КОНТЕЙНЕР даже после перезапуска Docker!"
-                    echo ""
-                    echo "📊 Детальная информация о контейнере:"
-                    sudo docker ps -a --filter name=scribot_bot
-                    echo ""
-                    echo "📊 Docker inspect:"
-                    sudo docker inspect scribot_bot 2>&1 | head -50 || true
-                    echo ""
-                    echo "📊 Процессы Docker:"
-                    ps aux | grep -E "docker|containerd" | head -20 || true
-                    exit 1
-                  fi
-                fi
-              fi
-            fi
-            
-            echo "✅ Все старые контейнеры удалены"
-            
-            # Функция для запуска контейнера через docker-compose
-            start_container() {
-              echo "🚀 Запускаем контейнер через docker-compose..."
-              
-              # Убеждаемся что старый контейнер полностью убит
-              OLD_CONTAINERS=$(sudo docker ps -a --filter name=scribot_bot --format "{{.ID}}" || true)
-              if [ -n "$OLD_CONTAINERS" ]; then
-                echo "⚠️  Найдены остатки старых контейнеров, удаляем..."
-                for CID in $OLD_CONTAINERS; do
-                  echo "  Останавливаем и удаляем контейнер $CID..."
-                  # Отключаем автоперезапуск
-                  sudo docker update --restart=no "$CID" 2>/dev/null || true
-                  # Используем docker kill для агрессивной остановки
-                  sudo docker kill "$CID" 2>/dev/null || true
-                  sleep 1
-                  # Удаляем контейнер
-                  sudo docker rm -f "$CID" 2>/dev/null || true
-                done
-                sleep 2
-              fi
-              
-              # Проверяем наличие docker-compose.prod.yml
-              if [ ! -f "$DEPLOYMENT_DIR/docker-compose.prod.yml" ]; then
-                echo "❌ Файл docker-compose.prod.yml не найден в $DEPLOYMENT_DIR"
-                echo "Содержимое директории:"
-                ls -la "$DEPLOYMENT_DIR" || true
-                return 1
-              fi
-              
-              # Создаем .env файл со всеми переменными окружения (в директории deployment, рядом с docker-compose.prod.yml)
-              echo "📝 Создаем .env файл..."
-              {
-                echo "BOT_TOKEN=$BOT_TOKEN"
-                echo "CHAT_URL=$CHAT_URL"
-                echo "FEEDBACK_URL=$FEEDBACK_URL"
-                echo "SOS_URL=$SOS_URL"
-                echo "ADMIN_ID=$ADMIN_ID"
-                echo "LOG_LEVEL=$LOG_LEVEL"
-                echo "REQUIRED_CHANNELS=$REQUIRED_CHANNELS"
-                echo "LLM_TOKEN=$LLM_TOKEN"
-                echo "YC_REGISTRY_ID=$YC_REGISTRY_ID"
-                echo "NEW_IMAGE=$NEW_IMAGE"
-              } > "$DEPLOYMENT_DIR/.env"
-              
-              # Запускаем через docker-compose
-              cd "$DEPLOYMENT_DIR" || return 1
-              echo "📂 Текущая директория: $(pwd)"
-              echo "📄 Проверяем наличие файлов:"
-              ls -la docker-compose.prod.yml .env || true
-              sudo docker-compose -f docker-compose.prod.yml up -d
-            }
-            
-            # Запускаем новый контейнер
-            echo "📦 Используем образ: $NEW_IMAGE"
-            if start_container; then
-              echo "✅ Контейнер запущен"
-            else
-              echo "❌ Ошибка запуска контейнера"
-              exit 1
-            fi
-            
-            # Ждем пока контейнер станет healthy (максимум 60 секунд)
-            echo "⏳ Ожидаем запуска и проверки healthcheck (до 60 секунд)..."
-            HEALTH_CHECK_TIMEOUT=60
-            HEALTH_CHECK_INTERVAL=5
-            ELAPSED=0
-            
-            while [ $ELAPSED -lt $HEALTH_CHECK_TIMEOUT ]; do
-              HEALTH_STATUS=$(sudo docker inspect --format='{{.State.Health.Status}}' scribot_bot 2>/dev/null || echo "none")
-              
-              if [ "$HEALTH_STATUS" = "healthy" ]; then
-                echo "✅ Контейнер здоров (healthy)"
-                break
-              elif [ "$HEALTH_STATUS" = "none" ]; then
-                # Контейнер без healthcheck или не запущен
-                if sudo docker ps --filter name=scribot_bot --filter status=running | grep -q scribot_bot; then
-                  echo "ℹ️  Контейнер работает (healthcheck не настроен)"
-                  break
-                else
-                  echo "❌ Контейнер не запущен"
-                  break
-                fi
-              else
-                echo "⏳ Статус: $HEALTH_STATUS (прошло ${ELAPSED}с)"
-                sleep $HEALTH_CHECK_INTERVAL
-                ELAPSED=$((ELAPSED + HEALTH_CHECK_INTERVAL))
-              fi
-            done
-            
-            # Финальная проверка статуса
-            FINAL_HEALTH_STATUS=$(sudo docker inspect --format='{{.State.Health.Status}}' scribot_bot 2>/dev/null || echo "none")
-            CONTAINER_RUNNING=$(sudo docker ps --filter name=scribot_bot --filter status=running | grep -q scribot_bot && echo "yes" || echo "no")
-            
-            if [ "$FINAL_HEALTH_STATUS" != "healthy" ] && [ "$FINAL_HEALTH_STATUS" != "none" ]; then
-              echo "❌ Контейнер не прошел healthcheck за ${HEALTH_CHECK_TIMEOUT} секунд!"
-              echo "Финальный статус: $FINAL_HEALTH_STATUS"
-              sudo docker logs scribot_bot --tail=50
-              
-              # Откатываемся к стабильной версии
-              if [ -n "$CURRENT_IMAGE" ]; then
-                echo "🔙 Откатываемся к предыдущей версии из-за проблем с healthcheck"
-                
-                # Останавливаем и удаляем контейнер через docker команды
-                sudo docker update --restart=no scribot_bot 2>/dev/null || true
-                sudo docker kill scribot_bot 2>/dev/null || true
-                sleep 1
-                sudo docker stop scribot_bot 2>/dev/null || true
-                sudo docker rm -f scribot_bot 2>/dev/null || true
-                
-                # Перетегируем backup образ как latest для docker-compose
-                echo "📦 Перетегируем $BACKUP_IMAGE -> $NEW_IMAGE"
-                sudo docker tag "$BACKUP_IMAGE" "$NEW_IMAGE" || echo "⚠️ Не удалось перетегировать"
-                
-                start_container
-                sleep 10
-                echo "🔄 Откат выполнен. Проверьте логи:"
-                sudo docker logs scribot_bot --tail=30
-                exit 1
-              else
-                echo "⚠️  Нет предыдущей версии для отката!"
-                exit 1
-              fi
-            fi
-            
-            if [ "$CONTAINER_RUNNING" = "yes" ]; then
-              echo "✅ Контейнер работает"
-              
-              # Проверяем логи на наличие критических ошибок
-              LOGS=$(sudo docker logs scribot_bot 2>&1 | tail -100)
-              if echo "$LOGS" | grep -iE "CRITICAL|ERROR.*Failed to|Exception.*startup|❌"; then
-                echo "❌ Обнаружены критические ошибки в логах!"
-                
-                # Откатываемся к стабильной версии
-                if [ -n "$CURRENT_IMAGE" ]; then
-                  echo "🔙 Откатываемся к предыдущей версии: $CURRENT_IMAGE"
-                  
-                  # Останавливаем и удаляем контейнер через docker команды
-                  sudo docker update --restart=no scribot_bot 2>/dev/null || true
-                  sudo docker kill scribot_bot 2>/dev/null || true
-                  sleep 1
-                  sudo docker stop scribot_bot 2>/dev/null || true
-                  sudo docker rm -f scribot_bot 2>/dev/null || true
-                  
-                  # Перетегируем backup образ как latest для docker-compose
-                  echo "📦 Перетегируем $BACKUP_IMAGE -> $NEW_IMAGE"
-                  sudo docker tag "$BACKUP_IMAGE" "$NEW_IMAGE" || echo "⚠️ Не удалось перетегировать"
-                  
-                  start_container
-                  sleep 10
-                  echo "🔄 Откат выполнен. Проверьте логи:"
-                  sudo docker logs scribot_bot --tail=30
-                  exit 1
-                else
-                  echo "⚠️  Нет предыдущей версии для отката!"
-                  sudo docker logs scribot_bot --tail=50
-                  exit 1
-                fi
-              else
-                echo "✅ Деплой успешен!"
-                sudo docker logs scribot_bot --tail=30
-                echo "📊 Статус контейнера:"
-                sudo docker ps --filter name=scribot_bot
-              fi
-            else
-              echo "❌ Контейнер не работает!"
-              
-              # Откатываемся к стабильной версии
-              if [ -n "$CURRENT_IMAGE" ]; then
-                echo "🔙 Откатываемся к предыдущей версии: $CURRENT_IMAGE"
-                
-                # Останавливаем и удаляем контейнер через docker команды
-                sudo docker update --restart=no scribot_bot 2>/dev/null || true
-                sudo docker kill scribot_bot 2>/dev/null || true
-                sleep 1
-                sudo docker stop scribot_bot 2>/dev/null || true
-                sudo docker rm -f scribot_bot 2>/dev/null || true
-                
-                # Перетегируем backup образ как latest для docker-compose
-                echo "📦 Перетегируем $BACKUP_IMAGE -> $NEW_IMAGE"
-                sudo docker tag "$BACKUP_IMAGE" "$NEW_IMAGE" || echo "⚠️ Не удалось перетегировать"
-                
-                start_container
-                sleep 10
-                echo "🔄 Откат выполнен"
-                sudo docker logs scribot_bot --tail=30
-              else
-                echo "⚠️  Нет предыдущей версии для отката!"
-                sudo docker logs scribot_bot --tail=50
-              fi
-              exit 1
-            fi
+            cd ~/ScribotV2/deployment
+            chmod +x deploy.sh
+            ./deploy.sh
       
       - name: Final verification
         if: always()
@@ -613,18 +152,12 @@ jobs:
             echo "🔍 Финальная проверка..."
             if sudo docker ps --filter name=scribot_bot --filter status=running | grep -q scribot_bot; then
               echo "✅ Бот работает"
-              echo ""
-              echo "📊 Информация о контейнере:"
               sudo docker ps --filter name=scribot_bot --format "table {{.Names}}\t{{.Status}}\t{{.Image}}"
               echo ""
               echo "📝 Последние логи:"
-              sudo docker logs scribot_bot --tail=20
+              sudo docker logs scribot_bot --tail=10
             else
               echo "❌ ВНИМАНИЕ: Бот не работает!"
-              echo ""
-              echo "📝 Последние логи:"
-              sudo docker logs scribot_bot --tail=50 2>&1 || echo "Логи недоступны"
+              sudo docker logs scribot_bot --tail=30 2>&1 || echo "Логи недоступны"
               exit 1
             fi
-
-
