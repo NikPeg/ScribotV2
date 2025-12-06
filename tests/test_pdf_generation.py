@@ -2,13 +2,14 @@
 Тесты для проверки генерации PDF документов.
 Проверяет корректность количества страниц и отсутствие лишних страниц.
 """
-import asyncio
 import contextlib
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
-import unittest
+
+import pytest
 
 # Добавляем корневую директорию проекта в путь
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -68,110 +69,102 @@ def get_pdf_page_count(pdf_path: str) -> int:
         raise RuntimeError("Таймаут при проверке PDF файла") from err
 
 
-class TestPDFGeneration(unittest.TestCase):
-    """Тесты для проверки генерации PDF документов"""
-    
-    def setUp(self):
-        """Настройка перед каждым тестом"""
-        self.temp_dir = tempfile.mkdtemp()
-        self.test_theme = "Тестовая работа для проверки генерации"
-        self.test_pages = 427
-    
-    def tearDown(self):
-        """Очистка после каждого теста"""
-        import shutil
-        if os.path.exists(self.temp_dir):
-            with contextlib.suppress(Exception):
-                shutil.rmtree(self.temp_dir)
-    
-    def test_pdf_generation_page_count(self):
-        """
-        Тест: проверяет, что сгенерированный PDF имеет ожидаемое количество страниц.
-        В тестовом режиме генерируется фиксированный контент, поэтому проверяем
-        что PDF создается корректно и имеет разумное количество страниц.
-        """
-        if not check_latex_available():
-            self.skipTest("LaTeX (pdflatex) не установлен. Пропускаем тест генерации PDF.")
-        
-        async def run_test():
-            result = await generate_test_work(
-                theme=self.test_theme,
-                pages=self.test_pages,
-                work_type="курсовая",
-                model_name=TEST_MODEL_NAME,
-                output_dir=self.temp_dir
-            )
-            
-            # Проверяем, что PDF был создан
-            if result['pdf_path'] is None:
-                raise AssertionError(
-                    "PDF файл не был создан. Возможно, LaTeX не установлен или произошла ошибка компиляции. "
-                    "Проверьте вывод генерации для деталей."
-                )
-            assert os.path.exists(result['pdf_path']), f"PDF файл должен существовать: {result['pdf_path']}"
-            
-            # Получаем количество страниц в PDF
-            pdf_page_count = get_pdf_page_count(result['pdf_path'])
-            
-            # В тестовом режиме генерируется фиксированный контент
-            # Проверяем, что PDF имеет разумное количество страниц (не 0, не слишком много)
-            assert pdf_page_count > 0, "PDF должен содержать хотя бы одну страницу"
-            assert pdf_page_count < MAX_REASONABLE_PAGES, "PDF не должен содержать слишком много страниц"
-            
-            # Проверяем, что количество страниц соответствует ожидаемому для тестового режима
-            # В тестовом режиме должно быть около 426 страниц
-            assert pdf_page_count == EXPECTED_PDF_PAGES, (
-                f"PDF должен содержать {EXPECTED_PDF_PAGES} страниц, но содержит {pdf_page_count}"
-            )
-            
-            return pdf_page_count
-        
-        # Запускаем асинхронный тест
-        page_count = asyncio.run(run_test())
-        assert page_count == EXPECTED_PDF_PAGES, f"PDF должен содержать ровно {EXPECTED_PDF_PAGES} страниц"
-    
-    def test_no_extra_pages_after_title(self):
-        """
-        Тест: проверяет, что нет лишних пустых страниц между титульным листом и содержанием.
-        Это критичный тест для отлова проблемы с пустыми страницами.
-        """
-        if not check_latex_available():
-            self.skipTest("LaTeX (pdflatex) не установлен. Пропускаем тест генерации PDF.")
-        
-        async def run_test():
-            result = await generate_test_work(
-                theme=self.test_theme,
-                pages=self.test_pages,
-                work_type="курсовая",
-                model_name=TEST_MODEL_NAME,
-                output_dir=self.temp_dir
-            )
-            
-            # Проверяем, что PDF был создан
-            if result['pdf_path'] is None:
-                raise AssertionError(
-                    "PDF файл не был создан. Возможно, LaTeX не установлен или произошла ошибка компиляции. "
-                    "Проверьте вывод генерации для деталей."
-                )
-            assert os.path.exists(result['pdf_path'])
-            
-            # Получаем количество страниц в PDF
-            pdf_page_count = get_pdf_page_count(result['pdf_path'])
-            
-            # Проверяем, что количество страниц соответствует ожидаемому
-            # Если есть лишняя страница, количество будет отличаться
-            assert pdf_page_count == EXPECTED_PDF_PAGES, (
-                f"Обнаружена проблема с количеством страниц! "
-                f"Ожидалось {EXPECTED_PDF_PAGES}, получено {pdf_page_count}. "
-                f"Возможно, есть лишняя пустая страница между титульным листом и содержанием."
-            )
-            
-            return pdf_page_count
-        
-        page_count = asyncio.run(run_test())
-        assert page_count == EXPECTED_PDF_PAGES
+@pytest.fixture
+def temp_dir():
+    """Фикстура для создания временной директории"""
+    temp_dir_path = tempfile.mkdtemp()
+    yield temp_dir_path
+    # Очистка после теста
+    if os.path.exists(temp_dir_path):
+        with contextlib.suppress(Exception):
+            shutil.rmtree(temp_dir_path)
 
 
-if __name__ == '__main__':
-    unittest.main()
+@pytest.fixture
+def test_theme():
+    """Фикстура для тестовой темы"""
+    return "Тестовая работа для проверки генерации"
 
+
+@pytest.fixture
+def test_pages():
+    """Фикстура для количества страниц"""
+    return 427
+
+
+@pytest.mark.asyncio
+async def test_pdf_generation_page_count(temp_dir, test_theme, test_pages):
+    """
+    Тест: проверяет, что сгенерированный PDF имеет ожидаемое количество страниц.
+    В тестовом режиме генерируется фиксированный контент, поэтому проверяем
+    что PDF создается корректно и имеет разумное количество страниц.
+    """
+    if not check_latex_available():
+        pytest.skip("LaTeX (pdflatex) не установлен. Пропускаем тест генерации PDF.")
+    
+    result = await generate_test_work(
+        theme=test_theme,
+        pages=test_pages,
+        work_type="курсовая",
+        model_name=TEST_MODEL_NAME,
+        output_dir=temp_dir
+    )
+    
+    # Проверяем, что PDF был создан
+    if result['pdf_path'] is None:
+        raise AssertionError(
+            "PDF файл не был создан. Возможно, LaTeX не установлен или произошла ошибка компиляции. "
+            "Проверьте вывод генерации для деталей."
+        )
+    assert os.path.exists(result['pdf_path']), f"PDF файл должен существовать: {result['pdf_path']}"
+    
+    # Получаем количество страниц в PDF
+    pdf_page_count = get_pdf_page_count(result['pdf_path'])
+    
+    # В тестовом режиме генерируется фиксированный контент
+    # Проверяем, что PDF имеет разумное количество страниц (не 0, не слишком много)
+    assert pdf_page_count > 0, "PDF должен содержать хотя бы одну страницу"
+    assert pdf_page_count < MAX_REASONABLE_PAGES, "PDF не должен содержать слишком много страниц"
+    
+    # Проверяем, что количество страниц соответствует ожидаемому для тестового режима
+    # В тестовом режиме должно быть около 426 страниц
+    assert pdf_page_count == EXPECTED_PDF_PAGES, (
+        f"PDF должен содержать {EXPECTED_PDF_PAGES} страниц, но содержит {pdf_page_count}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_no_extra_pages_after_title(temp_dir, test_theme, test_pages):
+    """
+    Тест: проверяет, что нет лишних пустых страниц между титульным листом и содержанием.
+    Это критичный тест для отлова проблемы с пустыми страницами.
+    """
+    if not check_latex_available():
+        pytest.skip("LaTeX (pdflatex) не установлен. Пропускаем тест генерации PDF.")
+    
+    result = await generate_test_work(
+        theme=test_theme,
+        pages=test_pages,
+        work_type="курсовая",
+        model_name=TEST_MODEL_NAME,
+        output_dir=temp_dir
+    )
+    
+    # Проверяем, что PDF был создан
+    if result['pdf_path'] is None:
+        raise AssertionError(
+            "PDF файл не был создан. Возможно, LaTeX не установлен или произошла ошибка компиляции. "
+            "Проверьте вывод генерации для деталей."
+        )
+    assert os.path.exists(result['pdf_path'])
+    
+    # Получаем количество страниц в PDF
+    pdf_page_count = get_pdf_page_count(result['pdf_path'])
+    
+    # Проверяем, что количество страниц соответствует ожидаемому
+    # Если есть лишняя страница, количество будет отличаться
+    assert pdf_page_count == EXPECTED_PDF_PAGES, (
+        f"Обнаружена проблема с количеством страниц! "
+        f"Ожидалось {EXPECTED_PDF_PAGES}, получено {pdf_page_count}. "
+        f"Возможно, есть лишняя пустая страница между титульным листом и содержанием."
+    )

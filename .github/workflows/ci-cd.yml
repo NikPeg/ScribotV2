@@ -65,18 +65,18 @@ jobs:
       - name: Run tests
         env:
           BOT_TOKEN: "test_token"
-          CHAT_URL: "https://test.chat.url"
+          CHANNEL_URL: "https://test.channel.url"
           FEEDBACK_URL: "https://test.feedback.url"
           SOS_URL: "https://test.sos.url"
           ADMIN_ID: "123456789"
           LLM_TOKEN: "test_llm_token"
         run: |
-          pytest tests/ -v --tb=short || python -m unittest discover tests -v
+          pytest tests/ -v --tb=short
       
       - name: Test migrations
         env:
           BOT_TOKEN: "test_token"
-          CHAT_URL: "https://test.chat.url"
+          CHANNEL_URL: "https://test.channel.url"
           FEEDBACK_URL: "https://test.feedback.url"
           SOS_URL: "https://test.sos.url"
           ADMIN_ID: "123456789"
@@ -137,7 +137,7 @@ jobs:
         uses: appleboy/ssh-action@v1.0.3
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
-          CHAT_URL: ${{ secrets.CHAT_URL }}
+          CHANNEL_URL: ${{ secrets.CHANNEL_URL }}
           FEEDBACK_URL: ${{ secrets.FEEDBACK_URL }}
           SOS_URL: ${{ secrets.SOS_URL }}
           ADMIN_ID: ${{ secrets.ADMIN_ID }}
@@ -153,7 +153,7 @@ jobs:
           host: ${{ secrets.YC_INSTANCE_IP }}
           username: ${{ secrets.YC_INSTANCE_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: BOT_TOKEN,CHAT_URL,FEEDBACK_URL,SOS_URL,ADMIN_ID,LOG_LEVEL,REQUIRED_CHANNELS,BASE_PRICE,LLM_TOKEN,YC_REGISTRY_ID,YC_SA_JSON_CREDENTIALS,NEW_IMAGE,BACKUP_IMAGE
+          envs: BOT_TOKEN,CHANNEL_URL,FEEDBACK_URL,SOS_URL,ADMIN_ID,LOG_LEVEL,REQUIRED_CHANNELS,BASE_PRICE,LLM_TOKEN,YC_REGISTRY_ID,YC_SA_JSON_CREDENTIALS,NEW_IMAGE,BACKUP_IMAGE
           script: |
             cd ~/ScribotV2/deployment
             chmod +x deploy.sh
