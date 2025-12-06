@@ -171,7 +171,7 @@ async def convert_tex_to_docx(tex_content: str, output_dir: str, filename: str) 
     Returns:
         Tuple[bool, str]: (успех, путь_к_файлу_или_ошибка)
     """
-    os.path.join(output_dir, f"{filename}.docx")
+    docx_file = os.path.join(output_dir, f"{filename}.docx")
     
     # Сначала компилируем LaTeX в PDF для сохранения форматирования
     success, pdf_path = await compile_latex_to_pdf(tex_content, output_dir, filename)

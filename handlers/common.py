@@ -12,12 +12,31 @@ from utils.admin_logger import send_admin_log
 
 common_router = Router()
 
-START_MESSAGE = (
-    "😻Это бот проекта Scribo. В нём ты можешь получить курсовую или дипломную работу всего за 99 рублей!\n\n"
-    "🔥В данный момент действует акция: <b>бесплатная</b> генерация половины работы!\n\n"
-    "<b>Выбери желаемое действие:</b>"
-)
-MENU_MESSAGE = START_MESSAGE
+
+def get_start_message() -> str:
+    """
+    Формирует стартовое сообщение с учетом наличия акции.
+    
+    Returns:
+        Текст стартового сообщения
+    """
+    base_message = (
+        "😻Это бот проекта Scribo. В нём ты можешь получить курсовую или дипломную работу всего за 99 рублей!\n\n"
+    )
+    
+    # Добавляем акцию, если она указана
+    if settings.promotion_text:
+        promotion_line = f"🔥В данный момент действует акция: {settings.promotion_text}\n\n"
+        base_message += promotion_line
+    
+    base_message += "<b>Выбери желаемое действие:</b>"
+    return base_message
+
+
+# Функция для получения стартового сообщения (вызывается динамически)
+def get_menu_message() -> str:
+    """Возвращает сообщение для главного меню (то же, что и стартовое)."""
+    return get_start_message()
 
 INFO_MESSAGE = (
     "<b>Scribo Bot: Ваш умный помощник</b> 🧠\n\n"
@@ -51,7 +70,7 @@ async def handle_start(message: Message, state: FSMContext):
         await send_admin_log(message.bot, message.from_user, "Новый пользователь зарегистрирован")
     
     await message.answer(
-        text=START_MESSAGE,
+        text=get_start_message(),
         reply_markup=get_main_menu_keyboard()
     )
     await send_admin_log(message.bot, message.from_user, "Нажал /start")
@@ -59,7 +78,7 @@ async def handle_start(message: Message, state: FSMContext):
 @common_router.callback_query(F.data == "main_menu")
 async def handle_menu(callback: CallbackQuery, state: FSMContext):
     await state.clear()
-    await callback.message.edit_text(text=MENU_MESSAGE, reply_markup=get_main_menu_keyboard())
+    await callback.message.edit_text(text=get_menu_message(), reply_markup=get_main_menu_keyboard())
     await callback.answer()
     await send_admin_log(callback.bot, callback.from_user, "Нажал кнопку 'Вернуться в меню'")
 
