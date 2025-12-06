@@ -16,6 +16,7 @@ services:
       - ADMIN_ID=${ADMIN_ID}
       - LOG_LEVEL=${LOG_LEVEL:-all}
       - REQUIRED_CHANNELS=${REQUIRED_CHANNELS:-}
+      - BASE_PRICE=${BASE_PRICE:-100}
       - LLM_TOKEN=${LLM_TOKEN}
     volumes:
       # Монтируем директорию с базой данных с хоста, чтобы она сохранялась между запусками

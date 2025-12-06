@@ -126,6 +126,7 @@ jobs:
           ADMIN_ID: ${{ secrets.ADMIN_ID }}
           LOG_LEVEL: ${{ secrets.LOG_LEVEL || 'all' }}
           REQUIRED_CHANNELS: ${{ secrets.REQUIRED_CHANNELS || '' }}
+          BASE_PRICE: ${{ secrets.BASE_PRICE || '100' }}
           LLM_TOKEN: ${{ secrets.LLM_TOKEN }}
           YC_REGISTRY_ID: ${{ secrets.YC_REGISTRY_ID }}
           YC_SA_JSON_CREDENTIALS: ${{ secrets.YC_SA_JSON_CREDENTIALS }}
@@ -135,7 +136,7 @@ jobs:
           host: ${{ secrets.YC_INSTANCE_IP }}
           username: ${{ secrets.YC_INSTANCE_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          envs: BOT_TOKEN,CHAT_URL,FEEDBACK_URL,SOS_URL,ADMIN_ID,LOG_LEVEL,REQUIRED_CHANNELS,LLM_TOKEN,YC_REGISTRY_ID,YC_SA_JSON_CREDENTIALS,NEW_IMAGE,BACKUP_IMAGE
+          envs: BOT_TOKEN,CHAT_URL,FEEDBACK_URL,SOS_URL,ADMIN_ID,LOG_LEVEL,REQUIRED_CHANNELS,BASE_PRICE,LLM_TOKEN,YC_REGISTRY_ID,YC_SA_JSON_CREDENTIALS,NEW_IMAGE,BACKUP_IMAGE
           script: |
             cd ~/ScribotV2/deployment
             chmod +x deploy.sh

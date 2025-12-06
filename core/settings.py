@@ -87,4 +87,4 @@ def calculate_price(model_name: str) -> int:
             multiplier = mult
             break
     
-    return int(settings.base_price * multiplier)
+    return int(settings.base_price * multiplier) - 1
