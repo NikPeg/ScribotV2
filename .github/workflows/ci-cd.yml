@@ -10,6 +10,20 @@ env:
   REGISTRY: cr.yandex
   IMAGE_NAME: scribot-bot
 
+# ⚠️ ВАЖНО: При добавлении новой переменной окружения обновите:
+# 1. Тестовые переменные ниже (в двух местах: Run tests и Test migrations)
+# 2. env секцию в deploy job (строка ~150) - для деплоя
+# 3. envs список в deploy job (строка ~169) - для передачи в SSH
+# Подробнее см. docs/CI_CD_VARIABLES.md
+#
+# Шаблон тестовых переменных (копируйте в оба места тестов):
+#   BOT_TOKEN: "test_token"
+#   CHANNEL_URL: "https://test.channel.url"
+#   FEEDBACK_URL: "https://test.feedback.url"
+#   SOS_URL: "https://test.sos.url"
+#   ADMIN_ID: "123456789"
+#   LLM_TOKEN: "test_llm_token"
+
 jobs:
   lint:
     name: Run Linter
@@ -63,6 +77,7 @@ jobs:
           pip install -r requirements/requirements-test.txt
       
       - name: Run tests
+        # ⚠️ При добавлении новой переменной: обновите здесь и в Test migrations ниже
         env:
           BOT_TOKEN: "test_token"
           CHANNEL_URL: "https://test.channel.url"
@@ -74,6 +89,7 @@ jobs:
           pytest tests/ -v --tb=short
       
       - name: Test migrations
+        # ⚠️ При добавлении новой переменной: обновите здесь и в Run tests выше
         env:
           BOT_TOKEN: "test_token"
           CHANNEL_URL: "https://test.channel.url"
@@ -135,6 +151,8 @@ jobs:
       
       - name: Deploy to server via SSH
         uses: appleboy/ssh-action@v1.0.3
+        # ⚠️ При добавлении новой переменной: добавьте её сюда, в envs список ниже, и в x-test-env выше (если нужна для тестов)
+        # Подробнее см. docs/CI_CD_VARIABLES.md
         env:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           CHANNEL_URL: ${{ secrets.CHANNEL_URL }}
@@ -154,6 +172,7 @@ jobs:
           host: ${{ secrets.YC_INSTANCE_IP }}
           username: ${{ secrets.YC_INSTANCE_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
+          # ⚠️ Список должен совпадать с именами переменных в env выше (кроме NEW_IMAGE и BACKUP_IMAGE - они вычисляются)
           envs: BOT_TOKEN,CHANNEL_URL,FEEDBACK_URL,SOS_URL,ADMIN_ID,LOG_LEVEL,REQUIRED_CHANNELS,BASE_PRICE,PROMOTION_TEXT,LLM_TOKEN,YC_REGISTRY_ID,YC_SA_JSON_CREDENTIALS,NEW_IMAGE,BACKUP_IMAGE
           script: |
             cd ~/ScribotV2/deployment
