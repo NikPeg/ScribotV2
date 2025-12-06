@@ -264,3 +264,43 @@ def is_chapter_complete(current_pages: float, target_pages: float, tolerance: fl
     min_pages = target_pages * (1 - tolerance)
     max_pages = target_pages * (1 + tolerance)
     return min_pages <= current_pages <= max_pages
+
+
+def count_plan_items(chapters: list[dict]) -> int:
+    """
+    Подсчитывает общее количество пунктов в плане (глав + подразделов).
+    
+    Args:
+        chapters: Список глав из плана
+    
+    Returns:
+        Общее количество пунктов (глав + подразделов)
+    """
+    total_items = 0
+    for chapter in chapters:
+        total_items += 1  # Сама глава
+        total_items += len(chapter.get('subsections', []))  # Подразделы
+    return total_items
+
+
+def validate_work_plan(plan_text: str, pages: int) -> tuple[bool, int]:
+    """
+    Валидирует план работы: проверяет, что количество пунктов достаточно.
+    
+    Args:
+        plan_text: Текст плана работы
+        pages: Целевое количество страниц
+    
+    Returns:
+        Кортеж (is_valid, items_count):
+        - is_valid: True, если план валиден (количество пунктов >= pages / 3)
+        - items_count: Количество пунктов в плане
+    """
+    try:
+        chapters = parse_work_plan(plan_text)
+        items_count = count_plan_items(chapters)
+        min_items = max(1, pages // 3)  # Минимум треть от числа страниц
+        is_valid = items_count >= min_items
+        return is_valid, items_count
+    except Exception:
+        return False, 0

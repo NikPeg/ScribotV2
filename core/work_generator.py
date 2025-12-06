@@ -23,7 +23,12 @@ from core.file_sender import (
     send_tex_file_to_admin,
 )
 from core.latex_template import create_latex_document
-from core.page_calculator import count_pages_in_text, count_total_pages_in_document, parse_work_plan
+from core.page_calculator import (
+    count_pages_in_text,
+    count_total_pages_in_document,
+    parse_work_plan,
+    validate_work_plan,
+)
 from db.database import get_order_info, save_full_tex, update_order_status
 from gpt.assistant import clear_conversation
 
@@ -113,7 +118,31 @@ async def _generate_simple_work(params: SimpleWorkGenerationParams) -> str:
 async def _generate_large_work(params: LargeWorkGenerationParams) -> str:
     """Генерирует большую работу с планом и оглавлением."""
     await _update_progress(ProgressUpdateParams(params.bot, params.chat_id, params.message_id_to_edit, 1, "Составляю план работы...", params.total_stages))
-    plan = await generate_work_plan(params.order_id, params.model_name, params.theme, params.pages, params.work_type)
+    
+    # Генерируем план с валидацией (до 3 попыток)
+    MAX_PLAN_ATTEMPTS = 3
+    plans = []
+    for attempt in range(MAX_PLAN_ATTEMPTS):
+        plan = await generate_work_plan(params.order_id, params.model_name, params.theme, params.pages, params.work_type)
+        is_valid, items_count = validate_work_plan(plan, params.pages)
+        plans.append((plan, items_count))
+        
+        if is_valid:
+            print(f"План валиден: {items_count} пунктов (минимум: {max(1, params.pages // 3)})")
+            break
+        
+        print(f"Попытка {attempt + 1}: план невалиден - {items_count} пунктов (минимум: {max(1, params.pages // 3)})")
+        if attempt < MAX_PLAN_ATTEMPTS - 1:
+            await _update_progress(
+                ProgressUpdateParams(
+                    params.bot, params.chat_id, params.message_id_to_edit, 1,
+                    f"Перегенерирую план... (попытка {attempt + 2}/{MAX_PLAN_ATTEMPTS})", params.total_stages
+                )
+            )
+    
+    # Выбираем план с максимальным количеством пунктов
+    plan, items_count = max(plans, key=lambda x: x[1])
+    print(f"Выбран план с {items_count} пунктами из {len(plans)} попыток")
 
     await _update_progress(ProgressUpdateParams(params.bot, params.chat_id, params.message_id_to_edit, 2, "Генерирую содержание по главам...", params.total_stages))
     
