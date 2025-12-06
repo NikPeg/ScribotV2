@@ -64,3 +64,6 @@ skip-magic-trailing-comma = false
 # Automatically detect the appropriate line ending
 line-ending = "auto"
 
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
