@@ -217,28 +217,50 @@ jobs:
             if [ -n "$CONTAINER_IDS" ]; then
               echo "🗑️  Найдены контейнеры для удаления: $CONTAINER_IDS"
               for CONTAINER_ID in $CONTAINER_IDS; do
-                echo "  Останавливаем контейнер $CONTAINER_ID..."
+                echo ""
+                echo "  ========== Обработка контейнера $CONTAINER_ID =========="
                 
                 # Отключаем автоперезапуск перед остановкой
-                echo "  Отключаем автоперезапуск для $CONTAINER_ID..."
-                sudo docker update --restart=no "$CONTAINER_ID" 2>/dev/null || true
+                echo "  [1/4] Отключаем автоперезапуск..."
+                if sudo docker update --restart=no "$CONTAINER_ID"; then
+                  echo "       ✅ restart=no установлен"
+                else
+                  echo "       ⚠️ Не удалось установить restart=no (код: $?)"
+                fi
                 
                 # Пытаемся остановить контейнер с таймаутом
-                echo "  Останавливаем контейнер $CONTAINER_ID..."
-                sudo docker stop --timeout 10 "$CONTAINER_ID" 2>/dev/null || true
+                echo "  [2/4] Останавливаем (docker stop --timeout 10)..."
+                if sudo docker stop --timeout 10 "$CONTAINER_ID"; then
+                  echo "       ✅ docker stop успешен"
+                else
+                  echo "       ⚠️ docker stop не удался (код: $?)"
+                fi
                 sleep 2
                 
-                # Если контейнер все еще работает, используем docker kill (более агрессивно)
+                # Проверяем статус
                 CONTAINER_STATUS=$(sudo docker inspect "$CONTAINER_ID" --format '{{.State.Status}}' 2>/dev/null || echo "unknown")
+                echo "       Статус после stop: $CONTAINER_STATUS"
+                
+                # Если контейнер все еще работает, используем docker kill (более агрессивно)
                 if [ "$CONTAINER_STATUS" = "running" ]; then
-                  echo "  Контейнер все еще работает, используем docker kill..."
-                  sudo docker kill "$CONTAINER_ID" 2>/dev/null || true
+                  echo "  [3/4] Контейнер всё ещё running, используем docker kill..."
+                  if sudo docker kill "$CONTAINER_ID"; then
+                    echo "       ✅ docker kill успешен"
+                  else
+                    echo "       ⚠️ docker kill не удался (код: $?)"
+                  fi
                   sleep 2
+                else
+                  echo "  [3/4] docker kill не нужен (статус: $CONTAINER_STATUS)"
                 fi
                 
                 # Удаляем контейнер
-                echo "  Удаляем контейнер $CONTAINER_ID..."
-                sudo docker rm -f "$CONTAINER_ID" 2>/dev/null || true
+                echo "  [4/4] Удаляем контейнер (docker rm -f)..."
+                if sudo docker rm -f "$CONTAINER_ID"; then
+                  echo "       ✅ docker rm -f успешен"
+                else
+                  echo "       ❌ docker rm -f НЕ УДАЛСЯ (код: $?)"
+                fi
                 sleep 1
               done
               sleep 3
@@ -246,27 +268,48 @@ jobs:
             
             # Финальная проверка и экстренные меры
             if sudo docker ps -a --filter name=scribot_bot --format "{{.Names}}" | grep -q scribot_bot; then
-              echo "⚠️  Контейнер все еще существует, применяем экстренные меры..."
+              echo ""
+              echo "⚠️  ========== ЭКСТРЕННЫЕ МЕРЫ =========="
+              echo "Контейнер всё ещё существует после стандартной процедуры!"
               
-              # Последняя попытка - используем только docker команды
+              # Показываем текущее состояние
+              echo "📊 Текущее состояние контейнера:"
+              sudo docker ps -a --filter name=scribot_bot
+              
               REMAINING_IDS=$(sudo docker ps -a --filter name=scribot_bot --format "{{.ID}}")
               for CONTAINER_ID in $REMAINING_IDS; do
-                echo "  Экстренная остановка контейнера $CONTAINER_ID..."
+                echo ""
+                echo "  🔧 Экстренная обработка контейнера $CONTAINER_ID..."
                 
                 # Отключаем автоперезапуск
-                sudo docker update --restart=no "$CONTAINER_ID" 2>/dev/null || true
+                echo "  [E1] docker update --restart=no..."
+                sudo docker update --restart=no "$CONTAINER_ID" || echo "       ⚠️ Код: $?"
                 
                 # Используем docker kill (более агрессивно чем stop)
-                sudo docker kill "$CONTAINER_ID" 2>/dev/null || true
+                echo "  [E2] docker kill..."
+                if sudo docker kill "$CONTAINER_ID"; then
+                  echo "       ✅ docker kill успешен"
+                else
+                  echo "       ⚠️ docker kill: код $?"
+                fi
                 sleep 2
                 
+                # Проверяем статус
+                CONTAINER_STATUS=$(sudo docker inspect "$CONTAINER_ID" --format '{{.State.Status}}' 2>/dev/null || echo "removed")
+                echo "       Статус после kill: $CONTAINER_STATUS"
+                
                 # Пытаемся остановить еще раз
-                sudo docker stop --timeout 5 "$CONTAINER_ID" 2>/dev/null || true
+                echo "  [E3] docker stop --timeout 5..."
+                sudo docker stop --timeout 5 "$CONTAINER_ID" || echo "       ⚠️ Код: $?"
                 sleep 2
                 
                 # Принудительное удаление
-                echo "  Принудительное удаление контейнера $CONTAINER_ID..."
-                sudo docker rm -f "$CONTAINER_ID" 2>/dev/null || true
+                echo "  [E4] docker rm -f..."
+                if sudo docker rm -f "$CONTAINER_ID"; then
+                  echo "       ✅ docker rm -f успешен"
+                else
+                  echo "       ❌ docker rm -f: код $?"
+                fi
                 sleep 2
               done
               
@@ -282,13 +325,30 @@ jobs:
                   
                   if [ "$CONTAINER_PID" != "0" ] && [ -n "$CONTAINER_PID" ]; then
                     echo "  💀 Убиваем процесс $CONTAINER_PID через kill -9..."
-                    sudo kill -9 "$CONTAINER_PID" 2>/dev/null || true
+                    if sudo kill -9 "$CONTAINER_PID"; then
+                      echo "  ✅ kill -9 выполнен успешно"
+                    else
+                      echo "  ❌ kill -9 FAILED! Exit code: $?"
+                    fi
                     sleep 3
+                    
+                    # Проверяем, жив ли процесс
+                    if ps -p "$CONTAINER_PID" > /dev/null 2>&1; then
+                      echo "  ⚠️  Процесс $CONTAINER_PID всё ещё жив!"
+                    else
+                      echo "  ✅ Процесс $CONTAINER_PID убит"
+                    fi
+                  else
+                    echo "  ⚠️  PID контейнера: $CONTAINER_PID (невалидный или 0)"
                   fi
                   
                   # Пробуем удалить контейнер после убийства процесса
                   echo "  🗑️  Удаляем контейнер $ZOMBIE_ID..."
-                  sudo docker rm -f "$ZOMBIE_ID" 2>/dev/null || true
+                  if sudo docker rm -f "$ZOMBIE_ID"; then
+                    echo "  ✅ docker rm -f выполнен успешно"
+                  else
+                    echo "  ❌ docker rm -f FAILED! Exit code: $?"
+                  fi
                   sleep 1
                 done
                 
@@ -296,23 +356,52 @@ jobs:
                 if sudo docker ps -a --filter name=scribot_bot --format "{{.Names}}" | grep -q scribot_bot; then
                   echo "⚠️  Контейнер всё ещё существует после kill -9, пробуем перезапуск Docker..."
                   
+                  # Показываем состояние контейнера
+                  echo "📊 Состояние контейнера перед перезапуском Docker:"
+                  sudo docker inspect scribot_bot --format 'Status: {{.State.Status}}, Pid: {{.State.Pid}}, Running: {{.State.Running}}' || true
+                  
                   # Перезапуск Docker daemon как последнее средство
                   echo "  🔄 Перезапускаем Docker daemon..."
-                  sudo systemctl restart docker 2>/dev/null || sudo service docker restart 2>/dev/null || true
-                  sleep 5
+                  if sudo systemctl restart docker; then
+                    echo "  ✅ Docker daemon перезапущен через systemctl"
+                  elif sudo service docker restart; then
+                    echo "  ✅ Docker daemon перезапущен через service"
+                  else
+                    echo "  ❌ Не удалось перезапустить Docker daemon!"
+                  fi
+                  sleep 10
+                  
+                  # После перезапуска Docker нужно заново залогиниться в registry
+                  echo "  🔐 Повторный логин в Yandex Container Registry..."
+                  echo '${{ secrets.YC_SA_JSON_CREDENTIALS }}' > /tmp/key.json
+                  cat /tmp/key.json | sudo docker login --username json_key --password-stdin cr.yandex/${{ secrets.YC_REGISTRY_ID }} || echo "⚠️ Не удалось залогиниться"
+                  rm -f /tmp/key.json
                   
                   # Финальная попытка удаления
+                  echo "  🗑️  Финальная попытка удаления после перезапуска Docker..."
                   FINAL_IDS=$(sudo docker ps -a --filter name=scribot_bot --format "{{.ID}}")
                   for FINAL_ID in $FINAL_IDS; do
-                    sudo docker rm -f "$FINAL_ID" 2>/dev/null || true
+                    echo "  Удаляем $FINAL_ID..."
+                    if sudo docker rm -f "$FINAL_ID"; then
+                      echo "  ✅ Контейнер $FINAL_ID удалён"
+                    else
+                      echo "  ❌ Не удалось удалить $FINAL_ID"
+                    fi
                   done
                   sleep 2
                   
                   # Абсолютно финальная проверка
                   if sudo docker ps -a --filter name=scribot_bot --format "{{.Names}}" | grep -q scribot_bot; then
                     echo "❌ НЕВОЗМОЖНО УДАЛИТЬ КОНТЕЙНЕР даже после перезапуска Docker!"
-                    echo "Информация о контейнере:"
+                    echo ""
+                    echo "📊 Детальная информация о контейнере:"
                     sudo docker ps -a --filter name=scribot_bot
+                    echo ""
+                    echo "📊 Docker inspect:"
+                    sudo docker inspect scribot_bot 2>&1 | head -50 || true
+                    echo ""
+                    echo "📊 Процессы Docker:"
+                    ps aux | grep -E "docker|containerd" | head -20 || true
                     exit 1
                   fi
                 fi
