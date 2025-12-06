@@ -19,7 +19,6 @@ from core.document_converter import (  # noqa: E402
     compile_latex_to_pdf,
     create_partial_pdf_with_qr,
 )
-from core.settings import calculate_price  # noqa: E402
 from gpt.assistant import TEST_MODEL_NAME  # noqa: E402
 from scripts.generate import generate_test_work  # noqa: E402
 
@@ -125,12 +124,10 @@ class TestPartialPDFGeneration(unittest.TestCase):
             # Создаем частичную версию с QR-кодами
             # Используем тестовую ссылку на оплату
             test_payment_url = "https://t.me/test_payment"
-            price = calculate_price(TEST_MODEL_NAME)
             
             success, partial_pdf_path = await create_partial_pdf_with_qr(
                 full_pdf_path=result['pdf_path'],
                 payment_url=test_payment_url,
-                price=price,
                 user_id=self.test_user_id,
                 temp_dir=self.temp_dir,
                 output_filename="test_partial"
@@ -182,12 +179,10 @@ class TestPartialPDFGeneration(unittest.TestCase):
             
             # Создаем частичную версию
             test_payment_url = "https://t.me/test_payment"
-            price = calculate_price(TEST_MODEL_NAME)
             
             success, partial_pdf_path = await create_partial_pdf_with_qr(
                 full_pdf_path=result['pdf_path'],
                 payment_url=test_payment_url,
-                price=price,
                 user_id=self.test_user_id,
                 temp_dir=self.temp_dir,
                 output_filename="test_partial"

@@ -8,7 +8,6 @@ import os
 import re
 
 import qrcode
-from PIL import Image, ImageDraw, ImageFont
 from pypdf import PdfReader, PdfWriter
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
@@ -326,73 +325,12 @@ def _create_qr_code_image(payment_url: str, user_id: int, temp_dir: str) -> str:
     return qr_path
 
 
-def _create_text_image(text: str, font_size: int, width_px: int, user_id: int, temp_dir: str) -> str:
+def _create_qr_code_pdf_page(payment_url: str, user_id: int, temp_dir: str) -> str:
     """
-    Создает изображение с текстом для вставки в PDF (для поддержки кириллицы).
-    
-    Args:
-        text: Текст для отображения
-        font_size: Размер шрифта
-        width_px: Ширина изображения в пикселях
-        user_id: ID пользователя (для уникального имени файла)
-        temp_dir: Временная директория
-    
-    Returns:
-        Путь к файлу с изображением текста
-    """
-    # Создаем изображение с прозрачным фоном
-    img = Image.new('RGBA', (width_px, 100), (255, 255, 255, 0))
-    draw = ImageDraw.Draw(img)
-    
-    # Пробуем использовать системный шрифт с поддержкой кириллицы
-    try:
-        # Пробуем использовать системные шрифты
-        font_paths = [
-            '/System/Library/Fonts/Helvetica.ttc',  # macOS
-            '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',  # Linux
-            'C:/Windows/Fonts/arial.ttf',  # Windows
-        ]
-        font = None
-        for font_path in font_paths:
-            if os.path.exists(font_path):
-                try:
-                    font = ImageFont.truetype(font_path, font_size)
-                    break
-                except Exception:
-                    continue
-        
-        if font is None:
-            # Используем стандартный шрифт
-            font = ImageFont.load_default()
-    except Exception:
-        font = ImageFont.load_default()
-    
-    # Получаем размеры текста
-    bbox = draw.textbbox((0, 0), text, font=font)
-    text_width = bbox[2] - bbox[0]
-    text_height = bbox[3] - bbox[1]
-    
-    # Создаем новое изображение с правильным размером
-    img = Image.new('RGBA', (text_width + 20, text_height + 20), (255, 255, 255, 0))
-    draw = ImageDraw.Draw(img)
-    
-    # Рисуем текст
-    draw.text((10, 10), text, fill=(0, 0, 0, 255), font=font)
-    
-    # Сохраняем изображение
-    text_img_path = os.path.join(temp_dir, f"text_{user_id}_{hash(text)}.png")
-    img.save(text_img_path)
-    
-    return text_img_path
-
-
-def _create_qr_code_pdf_page(payment_url: str, price: int, user_id: int, temp_dir: str) -> str:
-    """
-    Создает PDF страницу с QR-кодом и текстом об оплате.
+    Создает PDF страницу с QR-кодом.
     
     Args:
         payment_url: Ссылка на оплату
-        price: Цена в звездочках
         user_id: ID пользователя (для уникального имени файла)
         temp_dir: Временная директория
     
@@ -412,30 +350,10 @@ def _create_qr_code_pdf_page(payment_url: str, price: int, user_id: int, temp_di
     
     # Позиция QR-кода по центру страницы
     qr_x = (width - qr_size) / 2
-    qr_y = (height - qr_size) / 2 + 30 * mm  # Немного выше центра для текста
+    qr_y = (height - qr_size) / 2
     
     # Вставляем QR-код
     c.drawImage(qr_path, qr_x, qr_y, width=qr_size, height=qr_size)
-    
-    # Создаем изображения с текстом для поддержки кириллицы
-    text = "Для получения полной версии произведите оплату по ссылке"
-    text_img_path = _create_text_image(text, 16, int(width), user_id, temp_dir)
-    
-    # Вставляем текст как изображение
-    text_y = qr_y - 25 * mm
-    text_img = Image.open(text_img_path)
-    text_height = 20 * mm  # Высота текста
-    text_width_img = (text_height / text_img.height) * text_img.width
-    c.drawImage(text_img_path, (width - text_width_img) / 2, text_y, width=text_width_img, height=text_height)
-    
-    # Добавляем цену
-    price_text = f"Цена: {price} ⭐"
-    price_img_path = _create_text_image(price_text, 14, int(width), user_id, temp_dir)
-    price_y = text_y - 18 * mm
-    price_img = Image.open(price_img_path)
-    price_height = 15 * mm
-    price_width_img = (price_height / price_img.height) * price_img.width
-    c.drawImage(price_img_path, (width - price_width_img) / 2, price_y, width=price_width_img, height=price_height)
     
     c.save()
     
@@ -445,7 +363,6 @@ def _create_qr_code_pdf_page(payment_url: str, price: int, user_id: int, temp_di
 async def create_partial_pdf_with_qr(  # noqa: PLR0913
     full_pdf_path: str,
     payment_url: str,
-    price: int,
     user_id: int,
     temp_dir: str,
     output_filename: str
@@ -456,7 +373,6 @@ async def create_partial_pdf_with_qr(  # noqa: PLR0913
     Args:
         full_pdf_path: Путь к полному PDF файлу
         payment_url: Ссылка на оплату
-        price: Цена в звездочках
         user_id: ID пользователя
         temp_dir: Временная директория
         output_filename: Имя выходного файла без расширения
@@ -484,7 +400,7 @@ async def create_partial_pdf_with_qr(  # noqa: PLR0913
             writer.add_page(reader.pages[i])
         
         # Создаем страницы с QR-кодами
-        qr_page_path = _create_qr_code_pdf_page(payment_url, price, user_id, temp_dir)
+        qr_page_path = _create_qr_code_pdf_page(payment_url, user_id, temp_dir)
         qr_reader = PdfReader(qr_page_path)
         qr_page = qr_reader.pages[0]
         

@@ -224,7 +224,6 @@ async def _compile_and_send_files(params: CompileAndSendParams) -> None:
     success, partial_pdf_path = await create_partial_pdf_with_qr(
         full_pdf_path=full_pdf_path,
         payment_url=payment_url,
-        price=price,
         user_id=params.user_id,
         temp_dir=params.temp_dir,
         output_filename=params.filename
