@@ -1,4 +1,6 @@
-FROM python:3.11-slim
+# Многоэтапная сборка Docker образа
+# Этап 1: Базовый образ с системными зависимостями
+FROM python:3.11-slim AS base
 
 # Установка системных зависимостей для LaTeX и LibreOffice
 # Используем минимальный набор LaTeX пакетов вместо texlive-full (экономит ~3GB и время сборки)
@@ -14,13 +16,28 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Создаем рабочую директорию
 WORKDIR /app
 
-# Копируем requirements и устанавливаем зависимости
-COPY requirements.txt .
+# Копируем requirements и устанавливаем зависимости для продакшена
+COPY requirements/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Копируем весь код приложения
+# Этап 2: Тестирование
+FROM base AS test
+
+# Копируем оба файла requirements (test ссылается на основной)
+COPY requirements/requirements.txt requirements/requirements-test.txt ./
+RUN pip install --no-cache-dir -r requirements-test.txt
+
+# Копируем код приложения
+COPY . .
+
+# Запускаем тесты
+RUN pytest tests/ -v --tb=short || exit 1
+
+# Этап 3: Продакшн (без тестовых зависимостей)
+FROM base AS production
+
+# Копируем код приложения
 COPY . .
 
 # Запускаем приложение
 CMD ["python", "main.py"]
-

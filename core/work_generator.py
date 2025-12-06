@@ -19,7 +19,6 @@ from core.content_generator import (
 )
 from core.document_converter import (
     compile_latex_to_pdf,
-    convert_pdf_to_docx,
     create_partial_pdf_with_qr,
 )
 from core.file_sender import (
@@ -237,16 +236,9 @@ async def _compile_and_send_files(params: CompileAndSendParams) -> None:
         pdf_path = partial_pdf_path
 
     current_stage += 1
-    await _update_progress(ProgressUpdateParams(params.bot, params.chat_id, params.message_id_to_edit, current_stage, "Конвертирую в DOCX...", total_stages))
-    # Конвертируем частичный PDF в DOCX, а не полный
-    success, result = await convert_pdf_to_docx(pdf_path, params.temp_dir, params.filename)
-    docx_path = result if success else None
-    if not success:
-        print(f"Предупреждение: не удалось создать DOCX файл: {result}")
-
-    current_stage += 1
     await _update_progress(ProgressUpdateParams(params.bot, params.chat_id, params.message_id_to_edit, current_stage, "Отправляю результат...", total_stages))
-    files_sent = await send_generated_files_to_user(params.bot, params.chat_id, pdf_path, docx_path, params.theme)
+    # DOCX файл не отправляем до оплаты - он будет доступен после оплаты
+    files_sent = await send_generated_files_to_user(params.bot, params.chat_id, pdf_path, None, params.theme)
 
     await params.bot.edit_message_text(
         text=f"{READY_SYMBOL * 10}\n✅ Генерация завершена успешно!",
@@ -257,10 +249,9 @@ async def _compile_and_send_files(params: CompileAndSendParams) -> None:
     final_message = (
         f"🎉 Поздравляю! Ваша работа успешно сгенерирована!\n\n"
         f"📁 Отправлено файлов: {files_sent}\n\n"
-        f"💡 Для получения полной версии работы произведите оплату {price} ⭐"
+        f"💡 Для получения полной версии работы произведите оплату {price} ⭐\n\n"
+        f"⚠️ DOCX файл будет доступен после оплаты"
     )
-    if docx_path is None:
-        final_message += "\n\n⚠️ DOCX файл не создан (требуется LibreOffice)"
     
     # Создаем кнопку с ссылкой на оплату
     payment_keyboard = InlineKeyboardMarkup(inline_keyboard=[[
