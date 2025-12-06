@@ -2,6 +2,8 @@
 Модуль для генерации содержания работ через GPT с контролем объема.
 """
 
+import random
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 
@@ -243,7 +245,12 @@ async def generate_work_content_stepwise(params: WorkContentParams) -> str:
     )
     bibliography_content = await _generate_bibliography(bibliography_params)
     
-    return (main_content + bibliography_content).strip()
+    full_content = (main_content + bibliography_content).strip()
+    
+    # Исправляем ссылки на источники
+    full_content = fix_citations_in_work_content(full_content)
+    
+    return full_content
 
 
 async def generate_chapter_content(params: ChapterContentParams) -> str:
@@ -279,7 +286,6 @@ async def generate_chapter_content(params: ChapterContentParams) -> str:
 Объем: примерно {int(target_pages * 1250)} символов.
 Формат: LaTeX (используй \\section{{Введение}} в начале).
 НЕ используй длинные строки - разбивай на короткие (до 80 символов).
-Используй ссылки на источники через команду \\cite{{source1}}, \\cite{{source2}} и т.д. где уместно.
 """
     
     elif 'заключение' in title_lower:
@@ -295,7 +301,6 @@ async def generate_chapter_content(params: ChapterContentParams) -> str:
 Объем: примерно {int(target_pages * 1250)} символов.
 Формат: LaTeX (используй \\section{{Заключение}} в начале).
 НЕ используй длинные строки - разбивай на короткие (до 80 символов).
-Используй ссылки на источники через команду \\cite{{source1}}, \\cite{{source2}} и т.д. где уместно.
 """
     
     elif 'список' in title_lower or 'библиография' in title_lower:
@@ -337,7 +342,6 @@ async def generate_chapter_content(params: ChapterContentParams) -> str:
 Формат: LaTeX (используй \\section{{{chapter_title}}} в начале).
 НЕ используй длинные строки - разбивай на короткие (до 80 символов).
 Можешь включить формулы, таблицы или рисунки где уместно.
-Используй ссылки на источники через команду \\cite{{source1}}, \\cite{{source2}} и т.д. где уместно.
 """
     
     return await ask_assistant(order_id, prompt, model_name)
@@ -387,7 +391,6 @@ async def generate_subsections_content(params: SubsectionsContentParams) -> str:
 - ОБЯЗАТЕЛЬНО используй \\subsection{{{subsection}}} в начале (НЕ \\section!)
 - НЕ используй длинные строки - разбивай на короткие (до 80 символов)
 - Пиши академический текст с примерами и анализом
-- Используй ссылки на источники через команду \\cite{{source1}}, \\cite{{source2}} и т.д. где уместно
 
 Начни с команды \\subsection{{{subsection}}} и продолжи содержанием.
 """
@@ -433,7 +436,6 @@ async def generate_simple_work_content(order_id: int, model_name: str, theme: st
 - НЕ используй длинные строки текста - разбивай абзацы на короткие строки (максимум 80 символов)
 - После каждого предложения делай перенос строки
 - Текст должен быть академическим
-- Используй ссылки на источники через команду \\cite{{source1}}, \\cite{{source2}} и т.д. где уместно
 
 Начни прямо с введения:
 """
@@ -467,7 +469,12 @@ async def generate_simple_work_content(order_id: int, model_name: str, theme: st
     bibliography = await ask_assistant(order_id, bibliography_prompt, model_name)
     
     # Объединяем основной текст и список источников
-    return main_content + "\n\n" + bibliography
+    full_content = main_content + "\n\n" + bibliography
+    
+    # Исправляем ссылки на источники
+    full_content = fix_citations_in_work_content(full_content)
+    
+    return full_content
 
 
 async def generate_full_work_content_legacy(order_id: int, model_name: str, theme: str, pages: int, work_type: str) -> str:
@@ -505,7 +512,12 @@ async def generate_full_work_content_legacy(order_id: int, model_name: str, them
 Начни прямо с введения:
 """
     
-    return await ask_assistant(order_id, full_work_prompt, model_name)
+    full_content = await ask_assistant(order_id, full_work_prompt, model_name)
+    
+    # Исправляем ссылки на источники
+    full_content = fix_citations_in_work_content(full_content)
+    
+    return full_content
 
 
 def fix_section_commands(content: str, expected_subsection_title: str) -> str:
@@ -559,3 +571,119 @@ def _is_bibliography_chapter(chapter_title: str) -> bool:
     """
     title_lower = chapter_title.lower()
     return any(keyword in title_lower for keyword in ['список', 'библиография', 'источник', 'литература'])
+
+
+def _extract_source_count_from_bibliography(bibliography_content: str) -> int:
+    """
+    Извлекает количество источников из библиографии.
+    
+    Ищет все \\bibitem{source?} и возвращает максимальный номер источника.
+    
+    Args:
+        bibliography_content: Содержимое раздела библиографии
+    
+    Returns:
+        Количество источников (максимальный номер)
+    """
+    # Ищем все \bibitem{source?} где ? - число
+    pattern = r'\\bibitem\{source(\d+)\}'
+    matches = re.findall(pattern, bibliography_content)
+    
+    if not matches:
+        return 0
+    
+    # Находим максимальный номер
+    max_source_num = max(int(num) for num in matches)
+    return max_source_num
+
+
+def _replace_citations_in_content(content: str, bibliography_content: str) -> str:
+    """
+    Заменяет все \\cite{???} на правильные номера источников из библиографии.
+    
+    Сначала идет по порядку (1, 2, 3...), потом выбирает рандомно из всех источников.
+    Не трогает уже правильные ссылки вида \\cite{source?}.
+    
+    Args:
+        content: Основной текст работы (без библиографии)
+        bibliography_content: Содержимое раздела библиографии
+    
+    Returns:
+        Текст с замененными ссылками на источники
+    """
+    # Извлекаем количество источников
+    source_count = _extract_source_count_from_bibliography(bibliography_content)
+    
+    if source_count == 0:
+        # Если источников нет, просто удаляем все \cite{???}, кроме уже правильных
+        # Удаляем только те, что не соответствуют формату source?
+        return re.sub(r'\\cite\{(?!source\d+\})[^}]+\}', '', content)
+    
+    # Находим все \cite{???} в тексте, но пропускаем уже правильные \cite{source?}
+    # Ищем только те, что не соответствуют формату source?
+    cite_pattern = r'\\cite\{(?!source\d+\})[^}]+\}'
+    citations = re.findall(cite_pattern, content)
+    
+    if not citations:
+        return content
+    
+    # Сначала идем по порядку (1, 2, 3...)
+    sequential_index = 0
+    
+    def replace_citation(match):
+        nonlocal sequential_index
+        if sequential_index < source_count:
+            # Используем последовательный номер
+            source_num = sequential_index + 1
+            sequential_index += 1
+        else:
+            # После последовательных - выбираем рандомно
+            source_num = random.randint(1, source_count)
+        
+        return f'\\cite{{source{source_num}}}'
+    
+    # Заменяем только неправильные ссылки
+    result = re.sub(cite_pattern, replace_citation, content)
+    
+    return result
+
+
+def fix_citations_in_work_content(full_content: str) -> str:
+    """
+    Исправляет ссылки на источники в полном тексте работы.
+    
+    Разделяет текст на основной контент и библиографию,
+    затем заменяет все \\cite{???} на правильные номера источников.
+    
+    Args:
+        full_content: Полное содержание работы (текст + библиография)
+    
+    Returns:
+        Содержание с исправленными ссылками
+    """
+    # Ищем раздел библиографии
+    bibliography_patterns = [
+        r'(.*?)(\\section\{[^}]*(?:Список|список)[^}]*(?:литературы|источников|использованных)[^}]*\}.*)',
+        r'(.*?)(\\section\*\{[^}]*(?:Список|список)[^}]*(?:литературы|источников|использованных)[^}]*\}.*)',
+        r'(.*?)(\\chapter\{[^}]*(?:Список|список)[^}]*(?:литературы|источников|использованных)[^}]*\}.*)'
+    ]
+    
+    main_content = full_content
+    bibliography_content = ""
+    
+    for pattern in bibliography_patterns:
+        match = re.search(pattern, full_content, re.DOTALL | re.IGNORECASE)
+        if match:
+            main_content = match.group(1)
+            bibliography_content = match.group(2)
+            break
+    
+    if not bibliography_content:
+        # Если библиография не найдена, просто возвращаем исходный текст
+        return full_content
+    
+    # Заменяем ссылки в основном контенте
+    fixed_main_content = _replace_citations_in_content(main_content, bibliography_content)
+    
+    # Объединяем исправленный основной контент и библиографию
+    return fixed_main_content + bibliography_content
