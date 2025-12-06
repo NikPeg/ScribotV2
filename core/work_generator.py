@@ -16,7 +16,11 @@ from core.content_generator import (
     generate_work_content_stepwise,
     generate_work_plan,
 )
-from core.document_converter import compile_latex_to_pdf, convert_tex_to_docx
+from core.document_converter import (
+    compile_latex_to_pdf,
+    convert_tex_to_docx,
+    create_partial_pdf_with_qr,
+)
 from core.file_sender import (
     send_error_log_to_admin,
     send_generated_files_to_user,
@@ -29,6 +33,7 @@ from core.page_calculator import (
     parse_work_plan,
     validate_work_plan,
 )
+from core.settings import calculate_price
 from db.database import get_order_info, save_full_tex, update_order_status
 from gpt.assistant import clear_conversation
 
@@ -83,6 +88,8 @@ class CompileAndSendParams:
     message_id_to_edit: int
     temp_dir: str
     filename: str
+    model_name: str
+    user_id: int
 
 
 # Исключение для ошибок компиляции LaTeX
@@ -196,7 +203,38 @@ async def _compile_and_send_files(params: CompileAndSendParams) -> None:
     if not success:
         raise LaTeXCompilationError(result)
     
-    pdf_path = result
+    full_pdf_path = result
+
+    # Рассчитываем цену
+    price = calculate_price(params.model_name)
+    
+    # Создаем ссылку на оплату
+    payment_url = await params.bot.create_invoice_link(
+        title=f"Полная версия работы: {params.theme[:50]}",
+        description=f"Оплата за полную версию работы. Заказ #{params.order_id}",
+        payload=str(params.order_id),  # Передаем order_id в payload для обработки платежа
+        provider_token="",  # Для Stars не нужен provider_token
+        currency="XTR",  # XTR - валюта Telegram Stars
+        prices=[{"label": "Полная версия работы", "amount": price}],  # amount в звездочках (для Stars минимальная единица = 1 звездочка)
+    )
+    
+    # Создаем частичный PDF с QR-кодами
+    await _update_progress(ProgressUpdateParams(params.bot, params.chat_id, params.message_id_to_edit, current_stage, "Создаю частичную версию...", total_stages))
+    success, partial_pdf_path = await create_partial_pdf_with_qr(
+        full_pdf_path=full_pdf_path,
+        payment_url=payment_url,
+        price=price,
+        user_id=params.user_id,
+        temp_dir=params.temp_dir,
+        output_filename=params.filename
+    )
+    
+    if not success:
+        print(f"Предупреждение: не удалось создать частичный PDF: {partial_pdf_path}")
+        # В случае ошибки отправляем полный PDF
+        pdf_path = full_pdf_path
+    else:
+        pdf_path = partial_pdf_path
 
     current_stage += 1
     await _update_progress(ProgressUpdateParams(params.bot, params.chat_id, params.message_id_to_edit, current_stage, "Конвертирую в DOCX...", total_stages))
@@ -215,7 +253,11 @@ async def _compile_and_send_files(params: CompileAndSendParams) -> None:
         message_id=params.message_id_to_edit
     )
     
-    final_message = f"🎉 Поздравляю! Ваша работа успешно сгенерирована!\n\n📁 Отправлено файлов: {files_sent}"
+    final_message = (
+        f"🎉 Поздравляю! Ваша работа успешно сгенерирована!\n\n"
+        f"📁 Отправлено файлов: {files_sent}\n\n"
+        f"💡 Для получения полной версии работы произведите оплату {price} ⭐ по QR-коду в документе."
+    )
     if docx_path is None:
         final_message += "\n\n⚠️ DOCX файл не создан (требуется LibreOffice или Pandoc)"
     
@@ -292,6 +334,7 @@ async def generate_work_async(
         theme = order_info['theme']
         pages = order_info['pages']
         work_type = order_info['work_type']
+        user_id = order_info['user_id']
 
         if pages == SMALL_WORK_PAGES:
             total_stages = 5
@@ -335,7 +378,9 @@ async def generate_work_async(
             chat_id=chat_id,
             message_id_to_edit=message_id_to_edit,
             temp_dir=temp_dir,
-            filename=filename
+            filename=filename,
+            model_name=model_name,
+            user_id=user_id
         )
         await _compile_and_send_files(compile_params)
 

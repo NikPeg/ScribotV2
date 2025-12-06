@@ -21,6 +21,11 @@ class Settings(BaseSettings):
     # Формат: @channel1,@channel2 или channel_id1,channel_id2
     required_channels: str = ""
 
+    # Базовая цена в звездочках Telegram
+    # Можно изменить через переменную BASE_PRICE в .env файле
+    # По умолчанию: 100 звездочек
+    base_price: int = 100
+
     # Список примеров тем для работ.
     sample_works: list[str] = [
         "Влияние интернет-мемов на современную политику",
@@ -56,3 +61,30 @@ def get_required_channels() -> list[str]:
     if not settings.required_channels:
         return []
     return [ch.strip() for ch in settings.required_channels.split(",") if ch.strip()]
+
+
+def calculate_price(model_name: str) -> int:
+    """
+    Рассчитывает цену в звездочках на основе модели.
+    
+    Args:
+        model_name: Название модели (например, 'google/gemini-2.5-flash-lite')
+    
+    Returns:
+        Цена в звездочках
+    """
+    # Множители для разных моделей
+    multipliers = {
+        'google/gemini-2.5-flash-lite': 1.0,
+        'deepseek/deepseek-chat-v3-0324': 1.5,
+        'openai/gpt-4o-mini': 2.0,
+    }
+    
+    # Определяем множитель по модели
+    multiplier = 1.0
+    for model_key, mult in multipliers.items():
+        if model_key in model_name.lower():
+            multiplier = mult
+            break
+    
+    return int(settings.base_price * multiplier)

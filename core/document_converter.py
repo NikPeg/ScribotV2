@@ -7,6 +7,12 @@ import contextlib
 import os
 import re
 
+import qrcode
+from pypdf import PdfReader, PdfWriter
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import mm
+from reportlab.pdfgen import canvas
+
 # Константы
 MIN_PDF_SIZE_BYTES = 1000  # Минимальный размер PDF файла (1KB)
 
@@ -226,3 +232,142 @@ def _extract_text_from_latex(tex_content: str) -> str:
     clean_text = re.sub(r'\{[^}]*\}', '', clean_text)
     clean_text = re.sub(r'\\\\', '\n', clean_text)
     return re.sub(r'\n\s*\n', '\n\n', clean_text)
+
+
+def _create_qr_code_image(payment_url: str, user_id: int, temp_dir: str) -> str:
+    """
+    Создает QR-код из ссылки на оплату и сохраняет его во временный файл.
+    
+    Args:
+        payment_url: Ссылка на оплату
+        user_id: ID пользователя (для уникального имени файла)
+        temp_dir: Временная директория
+    
+    Returns:
+        Путь к файлу с QR-кодом
+    """
+    qr = qrcode.QRCode(
+        version=1,
+        error_correction=qrcode.constants.ERROR_CORRECT_L,
+        box_size=10,
+        border=4,
+    )
+    qr.add_data(payment_url)
+    qr.make(fit=True)
+    
+    img = qr.make_image(fill_color="black", back_color="white")
+    qr_path = os.path.join(temp_dir, f"qr_code_{user_id}.png")
+    img.save(qr_path)
+    
+    return qr_path
+
+
+def _create_qr_code_pdf_page(payment_url: str, price: int, user_id: int, temp_dir: str) -> str:
+    """
+    Создает PDF страницу с QR-кодом и текстом об оплате.
+    
+    Args:
+        payment_url: Ссылка на оплату
+        price: Цена в звездочках
+        user_id: ID пользователя (для уникального имени файла)
+        temp_dir: Временная директория
+    
+    Returns:
+        Путь к PDF файлу с одной страницей
+    """
+    # Создаем QR-код
+    qr_path = _create_qr_code_image(payment_url, user_id, temp_dir)
+    
+    # Создаем PDF страницу
+    pdf_path = os.path.join(temp_dir, f"qr_page_{user_id}.pdf")
+    c = canvas.Canvas(pdf_path, pagesize=A4)
+    width, height = A4
+    
+    # Размер QR-кода - половина ширины страницы
+    qr_size = width * 0.5
+    
+    # Позиция QR-кода по центру страницы
+    qr_x = (width - qr_size) / 2
+    qr_y = (height - qr_size) / 2 + 30 * mm  # Немного выше центра для текста
+    
+    # Вставляем QR-код
+    c.drawImage(qr_path, qr_x, qr_y, width=qr_size, height=qr_size)
+    
+    # Добавляем текст
+    text_y = qr_y - 20 * mm
+    c.setFont("Helvetica-Bold", 16)
+    text = "Для получения полной версии произведите оплату по ссылке"
+    text_width = c.stringWidth(text, "Helvetica-Bold", 16)
+    c.drawString((width - text_width) / 2, text_y, text)
+    
+    # Добавляем цену
+    price_y = text_y - 15 * mm
+    c.setFont("Helvetica", 14)
+    price_text = f"Цена: {price} ⭐"
+    price_width = c.stringWidth(price_text, "Helvetica", 14)
+    c.drawString((width - price_width) / 2, price_y, price_text)
+    
+    c.save()
+    
+    return pdf_path
+
+
+async def create_partial_pdf_with_qr(  # noqa: PLR0913
+    full_pdf_path: str,
+    payment_url: str,
+    price: int,
+    user_id: int,
+    temp_dir: str,
+    output_filename: str
+) -> tuple[bool, str]:
+    """
+    Создает частичный PDF: первая половина страниц из оригинала + страницы с QR-кодами.
+    
+    Args:
+        full_pdf_path: Путь к полному PDF файлу
+        payment_url: Ссылка на оплату
+        price: Цена в звездочках
+        user_id: ID пользователя
+        temp_dir: Временная директория
+        output_filename: Имя выходного файла без расширения
+    
+    Returns:
+        Tuple[bool, str]: (успех, путь_к_файлу_или_ошибка)
+    """
+    try:
+        # Читаем оригинальный PDF
+        reader = PdfReader(full_pdf_path)
+        total_pages = len(reader.pages)
+        
+        if total_pages == 0:
+            return False, "PDF файл не содержит страниц"
+        
+        # Определяем количество страниц для первой половины
+        half_pages = total_pages // 2
+        qr_pages_count = total_pages - half_pages
+        
+        # Создаем новый PDF writer
+        writer = PdfWriter()
+        
+        # Добавляем первую половину страниц из оригинала
+        for i in range(half_pages):
+            writer.add_page(reader.pages[i])
+        
+        # Создаем страницы с QR-кодами
+        qr_page_path = _create_qr_code_pdf_page(payment_url, price, user_id, temp_dir)
+        qr_reader = PdfReader(qr_page_path)
+        qr_page = qr_reader.pages[0]
+        
+        # Добавляем страницы с QR-кодами
+        for _ in range(qr_pages_count):
+            writer.add_page(qr_page)
+        
+        # Сохраняем частичный PDF
+        partial_pdf_path = os.path.join(temp_dir, f"{output_filename}_partial.pdf")
+        with open(partial_pdf_path, 'wb') as output_file:
+            writer.write(output_file)
+        
+        return True, partial_pdf_path
+        
+    except Exception as e:
+        return False, f"Ошибка при создании частичного PDF: {e!s}"
