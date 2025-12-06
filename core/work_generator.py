@@ -9,6 +9,7 @@ import tempfile
 from dataclasses import dataclass
 
 from aiogram import Bot
+from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from core.content_generator import (
     WorkContentParams,
@@ -18,7 +19,7 @@ from core.content_generator import (
 )
 from core.document_converter import (
     compile_latex_to_pdf,
-    convert_tex_to_docx,
+    convert_pdf_to_docx,
     create_partial_pdf_with_qr,
 )
 from core.file_sender import (
@@ -238,7 +239,8 @@ async def _compile_and_send_files(params: CompileAndSendParams) -> None:
 
     current_stage += 1
     await _update_progress(ProgressUpdateParams(params.bot, params.chat_id, params.message_id_to_edit, current_stage, "Конвертирую в DOCX...", total_stages))
-    success, result = await convert_tex_to_docx(params.full_tex, params.temp_dir, params.filename)
+    # Конвертируем частичный PDF в DOCX, а не полный
+    success, result = await convert_pdf_to_docx(pdf_path, params.temp_dir, params.filename)
     docx_path = result if success else None
     if not success:
         print(f"Предупреждение: не удалось создать DOCX файл: {result}")
@@ -256,12 +258,24 @@ async def _compile_and_send_files(params: CompileAndSendParams) -> None:
     final_message = (
         f"🎉 Поздравляю! Ваша работа успешно сгенерирована!\n\n"
         f"📁 Отправлено файлов: {files_sent}\n\n"
-        f"💡 Для получения полной версии работы произведите оплату {price} ⭐ по QR-коду в документе."
+        f"💡 Для получения полной версии работы произведите оплату {price} ⭐"
     )
     if docx_path is None:
-        final_message += "\n\n⚠️ DOCX файл не создан (требуется LibreOffice или Pandoc)"
+        final_message += "\n\n⚠️ DOCX файл не создан (требуется LibreOffice)"
     
-    await params.bot.send_message(chat_id=params.chat_id, text=final_message)
+    # Создаем кнопку с ссылкой на оплату
+    payment_keyboard = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(
+            text=f"💳 Оплатить {price} ⭐",
+            url=payment_url
+        )
+    ]])
+    
+    await params.bot.send_message(
+        chat_id=params.chat_id,
+        text=final_message,
+        reply_markup=payment_keyboard
+    )
 
 
 async def _handle_generation_error(

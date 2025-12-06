@@ -8,6 +8,7 @@ import os
 import re
 
 import qrcode
+from PIL import Image, ImageDraw, ImageFont
 from pypdf import PdfReader, PdfWriter
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.units import mm
@@ -92,6 +93,69 @@ async def compile_latex_to_pdf(tex_content: str, output_dir: str, filename: str)
             
     except Exception as e:
         return False, f"Exception during LaTeX compilation: {e!s}"
+
+
+async def convert_pdf_to_docx(pdf_path: str, output_dir: str, filename: str) -> tuple[bool, str]:
+    """
+    Конвертирует PDF в DOCX используя LibreOffice.
+    
+    Args:
+        pdf_path: Путь к PDF файлу
+        output_dir: Директория для выходных файлов
+        filename: Имя файла без расширения
+    
+    Returns:
+        Tuple[bool, str]: (успех, путь_к_файлу_или_ошибка)
+    """
+    docx_file = os.path.join(output_dir, f"{filename}.docx")
+    
+    libreoffice_commands = [
+        'libreoffice',  # Linux/Windows в PATH
+        '/Applications/LibreOffice.app/Contents/MacOS/soffice',  # macOS стандартная установка
+        '/usr/bin/libreoffice',  # Linux системная установка
+        'soffice'  # Альтернативное имя
+    ]
+    
+    for cmd in libreoffice_commands:
+        try:
+            # Проверяем доступность команды
+            check_process = await asyncio.create_subprocess_exec(
+                cmd, '--version',
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            await check_process.communicate()
+            
+            if check_process.returncode == 0:
+                # Конвертируем PDF в DOCX
+                process = await asyncio.create_subprocess_exec(
+                    cmd,
+                    '--headless',
+                    '--convert-to', 'docx',
+                    '--outdir', output_dir,
+                    pdf_path,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+                
+                _stdout, _stderr = await process.communicate()
+                
+                # LibreOffice создает файл с именем исходного PDF, но с расширением .docx
+                pdf_basename = os.path.basename(pdf_path)
+                pdf_name_without_ext = os.path.splitext(pdf_basename)[0]
+                generated_docx = os.path.join(output_dir, f"{pdf_name_without_ext}.docx")
+                
+                if process.returncode == 0 and os.path.exists(generated_docx):
+                    # Переименовываем в нужное имя
+                    if generated_docx != docx_file:
+                        with contextlib.suppress(OSError):
+                            os.rename(generated_docx, docx_file)
+                    return True, docx_file
+                    
+        except Exception:
+            continue
+    
+    return False, "LibreOffice не найден или не может конвертировать PDF в DOCX"
 
 
 async def convert_tex_to_docx(tex_content: str, output_dir: str, filename: str) -> tuple[bool, str]:
@@ -262,6 +326,66 @@ def _create_qr_code_image(payment_url: str, user_id: int, temp_dir: str) -> str:
     return qr_path
 
 
+def _create_text_image(text: str, font_size: int, width_px: int, user_id: int, temp_dir: str) -> str:
+    """
+    Создает изображение с текстом для вставки в PDF (для поддержки кириллицы).
+    
+    Args:
+        text: Текст для отображения
+        font_size: Размер шрифта
+        width_px: Ширина изображения в пикселях
+        user_id: ID пользователя (для уникального имени файла)
+        temp_dir: Временная директория
+    
+    Returns:
+        Путь к файлу с изображением текста
+    """
+    # Создаем изображение с прозрачным фоном
+    img = Image.new('RGBA', (width_px, 100), (255, 255, 255, 0))
+    draw = ImageDraw.Draw(img)
+    
+    # Пробуем использовать системный шрифт с поддержкой кириллицы
+    try:
+        # Пробуем использовать системные шрифты
+        font_paths = [
+            '/System/Library/Fonts/Helvetica.ttc',  # macOS
+            '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',  # Linux
+            'C:/Windows/Fonts/arial.ttf',  # Windows
+        ]
+        font = None
+        for font_path in font_paths:
+            if os.path.exists(font_path):
+                try:
+                    font = ImageFont.truetype(font_path, font_size)
+                    break
+                except Exception:
+                    continue
+        
+        if font is None:
+            # Используем стандартный шрифт
+            font = ImageFont.load_default()
+    except Exception:
+        font = ImageFont.load_default()
+    
+    # Получаем размеры текста
+    bbox = draw.textbbox((0, 0), text, font=font)
+    text_width = bbox[2] - bbox[0]
+    text_height = bbox[3] - bbox[1]
+    
+    # Создаем новое изображение с правильным размером
+    img = Image.new('RGBA', (text_width + 20, text_height + 20), (255, 255, 255, 0))
+    draw = ImageDraw.Draw(img)
+    
+    # Рисуем текст
+    draw.text((10, 10), text, fill=(0, 0, 0, 255), font=font)
+    
+    # Сохраняем изображение
+    text_img_path = os.path.join(temp_dir, f"text_{user_id}_{hash(text)}.png")
+    img.save(text_img_path)
+    
+    return text_img_path
+
+
 def _create_qr_code_pdf_page(payment_url: str, price: int, user_id: int, temp_dir: str) -> str:
     """
     Создает PDF страницу с QR-кодом и текстом об оплате.
@@ -293,19 +417,25 @@ def _create_qr_code_pdf_page(payment_url: str, price: int, user_id: int, temp_di
     # Вставляем QR-код
     c.drawImage(qr_path, qr_x, qr_y, width=qr_size, height=qr_size)
     
-    # Добавляем текст
-    text_y = qr_y - 20 * mm
-    c.setFont("Helvetica-Bold", 16)
+    # Создаем изображения с текстом для поддержки кириллицы
     text = "Для получения полной версии произведите оплату по ссылке"
-    text_width = c.stringWidth(text, "Helvetica-Bold", 16)
-    c.drawString((width - text_width) / 2, text_y, text)
+    text_img_path = _create_text_image(text, 16, int(width), user_id, temp_dir)
+    
+    # Вставляем текст как изображение
+    text_y = qr_y - 25 * mm
+    text_img = Image.open(text_img_path)
+    text_height = 20 * mm  # Высота текста
+    text_width_img = (text_height / text_img.height) * text_img.width
+    c.drawImage(text_img_path, (width - text_width_img) / 2, text_y, width=text_width_img, height=text_height)
     
     # Добавляем цену
-    price_y = text_y - 15 * mm
-    c.setFont("Helvetica", 14)
     price_text = f"Цена: {price} ⭐"
-    price_width = c.stringWidth(price_text, "Helvetica", 14)
-    c.drawString((width - price_width) / 2, price_y, price_text)
+    price_img_path = _create_text_image(price_text, 14, int(width), user_id, temp_dir)
+    price_y = text_y - 18 * mm
+    price_img = Image.open(price_img_path)
+    price_height = 15 * mm
+    price_width_img = (price_height / price_img.height) * price_img.width
+    c.drawImage(price_img_path, (width - price_width_img) / 2, price_y, width=price_width_img, height=price_height)
     
     c.save()
     
