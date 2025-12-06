@@ -319,7 +319,7 @@ def _create_qr_code_image(payment_url: str, user_id: int, temp_dir: str) -> str:
     qr.add_data(payment_url)
     qr.make(fit=True)
     
-    img = qr.make_image(fill_color="black", back_color="white")
+    img = qr.make_image(fill_color="#220d8c", back_color="white")
     qr_path = os.path.join(temp_dir, f"qr_code_{user_id}.png")
     img.save(qr_path)
     
