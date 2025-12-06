@@ -15,8 +15,45 @@ async def init_db():
     # Применяем миграции (они создадут таблицы при необходимости)
     await run_migrations()
 
+
+async def get_or_create_user(user_id: int) -> bool:
+    """
+    Получает пользователя из БД или создает нового, если его нет.
+    Возвращает True, если пользователь был создан, False если уже существовал.
+    """
+    async with aiosqlite.connect(DB_NAME) as db:
+        # Проверяем, существует ли пользователь
+        cursor = await db.execute('SELECT user_id FROM users WHERE user_id = ?', (user_id,))
+        row = await cursor.fetchone()
+        
+        if row is None:
+            # Пользователя нет, создаем
+            await db.execute(
+                'INSERT INTO users (user_id, created_at) VALUES (?, ?)',
+                (user_id, datetime.now())
+            )
+            await db.commit()
+            return True
+        return False
+
+
+async def user_exists(user_id: int) -> bool:
+    """Проверяет, существует ли пользователь в БД."""
+    async with aiosqlite.connect(DB_NAME) as db:
+        cursor = await db.execute('SELECT user_id FROM users WHERE user_id = ?', (user_id,))
+        row = await cursor.fetchone()
+        return row is not None
+
+
 async def create_order(user_id: int, theme: str, pages: int, work_type: str, gpt_model: str) -> int:
-    """Создает новый заказ в БД и возвращает его ID."""
+    """
+    Создает новый заказ в БД и возвращает его ID.
+    Перед созданием проверяет, что пользователь существует в БД.
+    Если пользователя нет, создает его автоматически.
+    """
+    # Убеждаемся, что пользователь существует
+    await get_or_create_user(user_id)
+    
     async with aiosqlite.connect(DB_NAME) as db:
         cursor = await db.execute(
             '''

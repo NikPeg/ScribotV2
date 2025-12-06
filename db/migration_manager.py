@@ -3,10 +3,9 @@
 Менеджер миграций базы данных.
 Применяет миграции из папки migrations/ в порядке их версий.
 """
-import os
 import logging
+import os
 from pathlib import Path
-from typing import List, Tuple
 
 import aiosqlite
 
@@ -37,7 +36,7 @@ async def set_version(db: aiosqlite.Connection, version: int):
     await db.commit()
 
 
-async def get_migration_files() -> List[Tuple[int, Path]]:
+async def get_migration_files() -> list[tuple[int, Path]]:
     """Получает список файлов миграций, отсортированных по версии."""
     migrations = []
     

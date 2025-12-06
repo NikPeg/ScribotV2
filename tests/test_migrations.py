@@ -130,3 +130,72 @@ async def test_works_table_structure():
         if os.path.exists(temp_db_path):
             os.unlink(temp_db_path)
 
+
+@pytest.mark.asyncio
+async def test_users_table_structure():
+    """Проверяет, что таблица users имеет правильную структуру."""
+    # Создаем временную БД
+    with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as f:
+        temp_db_path = f.name
+    
+    try:
+        with patch('db.migration_manager.DB_NAME', temp_db_path):
+            await run_migrations()
+            
+            import aiosqlite
+            
+            async with aiosqlite.connect(temp_db_path) as db:
+                # Проверяем, что таблица users создана
+                cursor = await db.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name='users'"
+                )
+                row = await cursor.fetchone()
+                assert row is not None, "Таблица users не создана"
+                
+                # Получаем структуру таблицы
+                cursor = await db.execute("PRAGMA table_info(users)")
+                columns = await cursor.fetchall()
+                
+                column_names = [col[1] for col in columns]
+                
+                # Проверяем наличие обязательных полей
+                assert 'user_id' in column_names, "Поле user_id должно присутствовать"
+                assert 'created_at' in column_names, "Поле created_at должно присутствовать"
+                
+                # Проверяем, что user_id является PRIMARY KEY
+                user_id_col = [col for col in columns if col[1] == 'user_id'][0]
+                assert user_id_col[5] == 1, "user_id должен быть PRIMARY KEY"
+    finally:
+        if os.path.exists(temp_db_path):
+            os.unlink(temp_db_path)
+
+
+@pytest.mark.asyncio
+async def test_works_foreign_key():
+    """Проверяет, что в таблице works есть внешний ключ на users."""
+    # Создаем временную БД
+    with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as f:
+        temp_db_path = f.name
+    
+    try:
+        with patch('db.migration_manager.DB_NAME', temp_db_path):
+            await run_migrations()
+            
+            import aiosqlite
+            
+            async with aiosqlite.connect(temp_db_path) as db:
+                # Проверяем внешние ключи (SQLite хранит их в sqlite_master)
+                cursor = await db.execute(
+                    "SELECT sql FROM sqlite_master WHERE type='table' AND name='works'"
+                )
+                row = await cursor.fetchone()
+                assert row is not None, "Таблица works не найдена"
+                
+                sql = row[0]
+                # Проверяем наличие FOREIGN KEY в SQL
+                assert 'FOREIGN KEY' in sql.upper() or 'REFERENCES users' in sql.upper(), \
+                    "В таблице works должен быть внешний ключ на users"
+    finally:
+        if os.path.exists(temp_db_path):
+            os.unlink(temp_db_path)
+

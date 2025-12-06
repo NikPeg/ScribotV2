@@ -6,6 +6,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from core import OrderStates, settings
+from db.database import get_or_create_user
 from keyboards import get_back_to_menu_keyboard, get_main_menu_keyboard
 from utils.admin_logger import send_admin_log
 
@@ -43,6 +44,12 @@ INFO_MESSAGE = (
 @common_router.message(CommandStart())
 async def handle_start(message: Message, state: FSMContext):
     await state.clear()
+    
+    # Сохраняем пользователя в базу данных
+    user_created = await get_or_create_user(message.from_user.id)
+    if user_created:
+        await send_admin_log(message.bot, message.from_user, "Новый пользователь зарегистрирован")
+    
     await message.answer(
         text=START_MESSAGE,
         reply_markup=get_main_menu_keyboard()
