@@ -196,7 +196,7 @@ jobs:
               echo "🛑 Останавливаем через docker-compose.prod.yml..."
               cd "$DEPLOYMENT_DIR" || true
               # Останавливаем и удаляем контейнеры через docker-compose (более агрессивно)
-              sudo docker-compose -f docker-compose.prod.yml down --remove-orphans --timeout 10 2>/dev/null || true
+              sudo docker-compose -f docker-compose.prod.yml down --remove-orphans --timeout 30 2>/dev/null || true
               sleep 3
               # Дополнительно проверяем и удаляем, если что-то осталось
               sudo docker-compose -f docker-compose.prod.yml rm -f 2>/dev/null || true
@@ -225,7 +225,7 @@ jobs:
                 
                 # Пытаемся остановить контейнер с таймаутом
                 echo "  Останавливаем контейнер $CONTAINER_ID..."
-                sudo docker stop --timeout=10 "$CONTAINER_ID" 2>/dev/null || true
+                sudo docker stop --timeout 10 "$CONTAINER_ID" 2>/dev/null || true
                 sleep 2
                 
                 # Если контейнер все еще работает, используем docker kill (более агрессивно)
@@ -261,7 +261,7 @@ jobs:
                 sleep 2
                 
                 # Пытаемся остановить еще раз
-                sudo docker stop --timeout=5 "$CONTAINER_ID" 2>/dev/null || true
+                sudo docker stop --timeout 5 "$CONTAINER_ID" 2>/dev/null || true
                 sleep 2
                 
                 # Принудительное удаление
@@ -272,33 +272,49 @@ jobs:
               
               # Финальная-финальная проверка
               if sudo docker ps -a --filter name=scribot_bot --format "{{.Names}}" | grep -q scribot_bot; then
-                echo "❌ КРИТИЧЕСКАЯ ОШИБКА: Контейнер-зомби все еще существует!"
-                echo "Информация о контейнере:"
-                sudo docker ps -a --filter name=scribot_bot
+                echo "❌ Контейнер-зомби все еще существует! Убиваем через PID..."
                 
-                # Последняя попытка через docker-compose с более агрессивными флагами
-                echo "Попытка удалить через docker-compose (финальная)..."
-                cd "$DEPLOYMENT_DIR" || true
-                sudo docker-compose -f docker-compose.prod.yml down --remove-orphans --volumes --timeout 5 2>/dev/null || true
-                sleep 3
-                
-                # Еще одна попытка удалить через docker rm
-                FINAL_IDS=$(sudo docker ps -a --filter name=scribot_bot --format "{{.ID}}")
-                for FINAL_ID in $FINAL_IDS; do
-                  echo "  🔪 ФИНАЛЬНАЯ ПОПЫТКА: Удаляем контейнер $FINAL_ID..."
-                  sudo docker kill "$FINAL_ID" 2>/dev/null || true
-                  sleep 1
-                  sudo docker rm -f "$FINAL_ID" 2>/dev/null || true
+                # Получаем PID и убиваем процесс напрямую (это работает когда docker daemon не может)
+                ZOMBIE_IDS=$(sudo docker ps -a --filter name=scribot_bot --format "{{.ID}}")
+                for ZOMBIE_ID in $ZOMBIE_IDS; do
+                  echo "  🔪 Получаем PID контейнера $ZOMBIE_ID..."
+                  CONTAINER_PID=$(sudo docker inspect "$ZOMBIE_ID" --format '{{.State.Pid}}' 2>/dev/null || echo "0")
+                  
+                  if [ "$CONTAINER_PID" != "0" ] && [ -n "$CONTAINER_PID" ]; then
+                    echo "  💀 Убиваем процесс $CONTAINER_PID через kill -9..."
+                    sudo kill -9 "$CONTAINER_PID" 2>/dev/null || true
+                    sleep 3
+                  fi
+                  
+                  # Пробуем удалить контейнер после убийства процесса
+                  echo "  🗑️  Удаляем контейнер $ZOMBIE_ID..."
+                  sudo docker rm -f "$ZOMBIE_ID" 2>/dev/null || true
                   sleep 1
                 done
                 
-                # Финальная проверка
+                # Ещё одна проверка
                 if sudo docker ps -a --filter name=scribot_bot --format "{{.Names}}" | grep -q scribot_bot; then
-                  echo "❌ НЕВОЗМОЖНО УДАЛИТЬ КОНТЕЙНЕР! Требуется ручное вмешательство."
-                  echo "Попробуйте на сервере выполнить:"
-                  echo "  sudo docker kill \$(sudo docker ps -a -q --filter name=scribot_bot)"
-                  echo "  sudo docker rm -f \$(sudo docker ps -a -q --filter name=scribot_bot)"
-                  exit 1
+                  echo "⚠️  Контейнер всё ещё существует после kill -9, пробуем перезапуск Docker..."
+                  
+                  # Перезапуск Docker daemon как последнее средство
+                  echo "  🔄 Перезапускаем Docker daemon..."
+                  sudo systemctl restart docker 2>/dev/null || sudo service docker restart 2>/dev/null || true
+                  sleep 5
+                  
+                  # Финальная попытка удаления
+                  FINAL_IDS=$(sudo docker ps -a --filter name=scribot_bot --format "{{.ID}}")
+                  for FINAL_ID in $FINAL_IDS; do
+                    sudo docker rm -f "$FINAL_ID" 2>/dev/null || true
+                  done
+                  sleep 2
+                  
+                  # Абсолютно финальная проверка
+                  if sudo docker ps -a --filter name=scribot_bot --format "{{.Names}}" | grep -q scribot_bot; then
+                    echo "❌ НЕВОЗМОЖНО УДАЛИТЬ КОНТЕЙНЕР даже после перезапуска Docker!"
+                    echo "Информация о контейнере:"
+                    sudo docker ps -a --filter name=scribot_bot
+                    exit 1
+                  fi
                 fi
               fi
             fi

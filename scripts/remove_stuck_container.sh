@@ -36,7 +36,7 @@ sudo docker update --restart=no $CONTAINER_ID 2>/dev/null || true
 
 # Шаг 2: Пытаемся остановить через docker stop
 echo "⏹️  Шаг 2: Пытаемся docker stop (timeout 10s)..."
-sudo docker stop --time=10 $CONTAINER_ID 2>/dev/null || true
+sudo docker stop --timeout 10 $CONTAINER_ID 2>/dev/null || true
 sleep 2
 
 # Проверяем статус
