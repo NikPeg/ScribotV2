@@ -84,7 +84,7 @@ def get_model_keyboard():
     builder = InlineKeyboardBuilder()
 
     buttons = [
-        InlineKeyboardButton(text="ChatGPT-3.5", callback_data="model:openai/gpt-3.5-turbo"),
+        InlineKeyboardButton(text="Gemini", callback_data="model:google/gemini-2.5-pro"),
         InlineKeyboardButton(text="DeepSeek (x1.5 цена)", callback_data="model:deepseek/deepseek-chat-v3-0324"),
         InlineKeyboardButton(text="ChatGPT-4 (x2 цена)", callback_data="model:openai/gpt-4o-mini"),
         InlineKeyboardButton(text="🧪 ТЕСТ", callback_data="model:TEST"),
