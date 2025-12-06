@@ -19,9 +19,10 @@ services:
       - LLM_TOKEN=${LLM_TOKEN}
     volumes:
       # Монтируем директорию с базой данных с хоста, чтобы она сохранялась между запусками
-      - ./data:/app/data
+      # Используем ../data так как docker-compose запускается из deployment/
+      - ../data:/app/data
       # Монтируем директорию для логов LLM с хоста
-      - ./logs:/app/logs
+      - ../logs:/app/logs
     working_dir: /app
     # Убеждаемся, что контейнер не завершается при ошибках
     stdin_open: true

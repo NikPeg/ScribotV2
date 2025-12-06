@@ -118,7 +118,7 @@ jobs:
           username: ${{ secrets.YC_INSTANCE_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           source: "deployment/docker-compose.prod.yml"
-          target: "~/ScribotV2/docker-compose.prod.yml"
+          target: "~/ScribotV2/deployment/"
       
       - name: Deploy to server via SSH
         uses: appleboy/ssh-action@v1.0.3
@@ -146,17 +146,21 @@ jobs:
             
             # Создаем директории если их нет
             export DEPLOY_DIR="$HOME/ScribotV2"
-            mkdir -p "$DEPLOY_DIR/data" "$DEPLOY_DIR/logs"
+            export DEPLOYMENT_DIR="$DEPLOY_DIR/deployment"
+            mkdir -p "$DEPLOY_DIR/data" "$DEPLOY_DIR/logs" "$DEPLOYMENT_DIR"
             echo "📁 Директория деплоя: $DEPLOY_DIR"
+            echo "📁 Директория deployment: $DEPLOYMENT_DIR"
             
             # Проверяем наличие docker-compose.prod.yml после копирования
-            if [ ! -f "$DEPLOY_DIR/docker-compose.prod.yml" ]; then
+            if [ ! -f "$DEPLOYMENT_DIR/docker-compose.prod.yml" ]; then
               echo "⚠️  Файл docker-compose.prod.yml не найден, проверяем директорию..."
-              ls -la "$DEPLOY_DIR" || true
+              ls -la "$DEPLOYMENT_DIR" || true
               echo "Попытка найти файл..."
-              find "$HOME" -name "docker-compose.prod.yml" 2>/dev/null || true
+              find "$HOME" -name "docker-compose.prod.yml" -type f 2>/dev/null || true
+              echo "❌ Ошибка: docker-compose.prod.yml не найден как файл!"
+              exit 1
             else
-              echo "✅ Файл docker-compose.prod.yml найден"
+              echo "✅ Файл docker-compose.prod.yml найден в $DEPLOYMENT_DIR"
             fi
             
             # Логинимся в Yandex Container Registry
@@ -187,9 +191,9 @@ jobs:
             echo "⏸️  Останавливаем текущий контейнер..."
             
             # Сначала пытаемся остановить через docker-compose, если он запущен через него
-            if [ -f "$DEPLOY_DIR/docker-compose.prod.yml" ]; then
+            if [ -f "$DEPLOYMENT_DIR/docker-compose.prod.yml" ]; then
               echo "🛑 Останавливаем через docker-compose..."
-              cd "$DEPLOY_DIR" || true
+              cd "$DEPLOYMENT_DIR" || true
               # Останавливаем и удаляем контейнеры через docker-compose (более агрессивно)
               sudo docker-compose -f docker-compose.prod.yml down --remove-orphans --timeout 10 2>/dev/null || true
               sleep 3
@@ -265,7 +269,7 @@ jobs:
                 
                 # Последняя попытка через docker-compose с более агрессивными флагами
                 echo "Попытка удалить через docker-compose (финальная)..."
-                cd "$DEPLOY_DIR" || true
+                cd "$DEPLOYMENT_DIR" || true
                 sudo docker-compose -f docker-compose.prod.yml down --remove-orphans --volumes --timeout 5 2>/dev/null || true
                 sleep 3
                 
@@ -314,14 +318,14 @@ jobs:
               fi
               
               # Проверяем наличие docker-compose.prod.yml
-              if [ ! -f "$DEPLOY_DIR/docker-compose.prod.yml" ]; then
-                echo "❌ Файл docker-compose.prod.yml не найден в $DEPLOY_DIR"
+              if [ ! -f "$DEPLOYMENT_DIR/docker-compose.prod.yml" ]; then
+                echo "❌ Файл docker-compose.prod.yml не найден в $DEPLOYMENT_DIR"
                 echo "Содержимое директории:"
-                ls -la "$DEPLOY_DIR" || true
+                ls -la "$DEPLOYMENT_DIR" || true
                 return 1
               fi
               
-              # Создаем .env файл со всеми переменными окружения
+              # Создаем .env файл со всеми переменными окружения (в директории deployment, рядом с docker-compose.prod.yml)
               echo "📝 Создаем .env файл..."
               {
                 echo "BOT_TOKEN=$BOT_TOKEN"
@@ -334,10 +338,10 @@ jobs:
                 echo "LLM_TOKEN=$LLM_TOKEN"
                 echo "YC_REGISTRY_ID=$YC_REGISTRY_ID"
                 echo "NEW_IMAGE=$NEW_IMAGE"
-              } > "$DEPLOY_DIR/.env"
+              } > "$DEPLOYMENT_DIR/.env"
               
               # Запускаем через docker-compose
-              cd "$DEPLOY_DIR" || return 1
+              cd "$DEPLOYMENT_DIR" || return 1
               echo "📂 Текущая директория: $(pwd)"
               echo "📄 Проверяем наличие файлов:"
               ls -la docker-compose.prod.yml .env || true
