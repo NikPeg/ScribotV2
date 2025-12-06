@@ -76,6 +76,9 @@ def _get_llm_logger() -> logging.Logger:
     logger.addHandler(file_handler)
     logger.propagate = False  # Не передаем логи в корневой логгер
     
+    # Принудительно синхронизируем логи с диском для корректной работы с volume
+    file_handler.flush()
+    
     _llm_logger = logger
     return logger
 
@@ -194,6 +197,11 @@ def log_llm_request(params: LLMLogParams) -> None:
         if params.conversation_history:
             conv_length = len(params.conversation_history)
             logger.debug(f"LLM API context - Order ID: {params.order_id}, Conversation length: {conv_length}")
+        
+        # Принудительно синхронизируем логи с диском для корректной работы с volume
+        for handler in logger.handlers:
+            if hasattr(handler, 'flush'):
+                handler.flush()
             
     except Exception as e:
         # Не падаем, если логирование не удалось
