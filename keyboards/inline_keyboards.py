@@ -2,7 +2,7 @@ from aiogram.types import InlineKeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from core import settings
-from core.settings import get_required_channels
+from core.settings import calculate_price, get_required_channels
 
 
 def get_main_menu_keyboard():
@@ -83,10 +83,19 @@ def get_model_keyboard():
     """Возвращает клавиатуру для выбора модели GPT."""
     builder = InlineKeyboardBuilder()
 
+    # Рассчитываем цены для каждой модели на основе BASE_PRICE
+    gemini_model = "google/gemini-2.5-flash-lite"
+    deepseek_model = "deepseek/deepseek-chat-v3-0324"
+    chatgpt_model = "openai/gpt-4o-mini"
+    
+    gemini_price = calculate_price(gemini_model)
+    deepseek_price = calculate_price(deepseek_model)
+    chatgpt_price = calculate_price(chatgpt_model)
+
     buttons = [
-        InlineKeyboardButton(text="Gemini (100⭐️)", callback_data="model:google/gemini-2.5-flash-lite"),  # 1,05M context $0,10/M input tokens $0,40/M output tokens
-        InlineKeyboardButton(text="DeepSeek (150⭐️)", callback_data="model:deepseek/deepseek-chat-v3-0324"),  # 8K context $0,15/M input tokens $0,70/M output tokens
-        InlineKeyboardButton(text="ChatGPT (200⭐️)", callback_data="model:openai/gpt-4o-mini"),  # 128K context $0,15/M input tokens $0,60/M output tokens
+        InlineKeyboardButton(text=f"Gemini ({gemini_price}⭐️)", callback_data=f"model:{gemini_model}"),  # 1,05M context $0,10/M input tokens $0,40/M output tokens
+        InlineKeyboardButton(text=f"DeepSeek ({deepseek_price}⭐️)", callback_data=f"model:{deepseek_model}"),  # 8K context $0,15/M input tokens $0,70/M output tokens
+        InlineKeyboardButton(text=f"ChatGPT ({chatgpt_price}⭐️)", callback_data=f"model:{chatgpt_model}"),  # 128K context $0,15/M input tokens $0,60/M output tokens
         InlineKeyboardButton(text="🧪 ТЕСТ", callback_data="model:TEST"),
         InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_type"),
     ]
