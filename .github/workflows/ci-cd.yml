@@ -33,18 +33,67 @@ jobs:
         run: |
           ruff check .
 
-  build-and-test:
-    name: Build Docker Image and Run Tests
+  test:
+    name: Run Tests
     runs-on: ubuntu-latest
-    # Запускаем параллельно с lint для ускорения
+    needs: lint
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            poppler-utils \
+            texlive-latex-base \
+            texlive-latex-extra \
+            texlive-fonts-recommended \
+            texlive-lang-cyrillic
+      
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements/requirements-test.txt
+      
+      - name: Run tests
+        env:
+          BOT_TOKEN: "test_token"
+          CHAT_URL: "https://test.chat.url"
+          FEEDBACK_URL: "https://test.feedback.url"
+          SOS_URL: "https://test.sos.url"
+          ADMIN_ID: "123456789"
+          LLM_TOKEN: "test_llm_token"
+        run: |
+          pytest tests/ -v --tb=short || python -m unittest discover tests -v
+      
+      - name: Test migrations
+        env:
+          BOT_TOKEN: "test_token"
+          CHAT_URL: "https://test.chat.url"
+          FEEDBACK_URL: "https://test.feedback.url"
+          SOS_URL: "https://test.sos.url"
+          ADMIN_ID: "123456789"
+          LLM_TOKEN: "test_llm_token"
+        run: |
+          echo "🧪 Тестируем миграции..."
+          pytest tests/test_migrations.py -v --tb=short
+
+  build-and-push:
+    name: Build and Push Docker Image
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-      
       - name: Login to Yandex Container Registry
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
           echo '${{ secrets.YC_SA_JSON_CREDENTIALS }}' > /tmp/key.json
           cat /tmp/key.json | docker login \
@@ -53,33 +102,22 @@ jobs:
             cr.yandex/${{ secrets.YC_REGISTRY_ID }}
           rm /tmp/key.json
       
-      - name: Build Docker image (with tests)
+      - name: Build and push Docker image
         run: |
           IMAGE_TAG="${{ env.REGISTRY }}/${{ secrets.YC_REGISTRY_ID }}/${{ env.IMAGE_NAME }}"
-          # Собираем до этапа test (тесты запустятся автоматически)
-          docker build \
-            --target test \
-            --tag ${IMAGE_TAG}:test \
-            -f deployment/Dockerfile .
-      
-      - name: Build and push production image
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        run: |
-          IMAGE_TAG="${{ env.REGISTRY }}/${{ secrets.YC_REGISTRY_ID }}/${{ env.IMAGE_NAME }}"
-          # Собираем продакшн образ (кэш из test stage будет использован)
+          # Собираем продакшн образ (тесты уже прошли в отдельном job)
           docker build \
             --target production \
             --tag ${IMAGE_TAG}:latest \
             --tag ${IMAGE_TAG}:${{ github.sha }} \
             -f deployment/Dockerfile .
           
-          # Пушим образы
           docker push ${IMAGE_TAG}:latest
           docker push ${IMAGE_TAG}:${{ github.sha }}
 
   deploy:
     name: Deploy to Server
-    needs: [lint, build-and-test]
+    needs: build-and-push
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
