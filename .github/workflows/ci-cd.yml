@@ -216,7 +216,7 @@ jobs:
                 
                 # Пытаемся остановить контейнер с таймаутом
                 echo "  Останавливаем контейнер $CONTAINER_ID..."
-                sudo docker stop --time=10 "$CONTAINER_ID" 2>/dev/null || true
+                sudo docker stop --timeout=10 "$CONTAINER_ID" 2>/dev/null || true
                 sleep 2
                 
                 # Если контейнер все еще работает, используем docker kill (более агрессивно)
@@ -252,7 +252,7 @@ jobs:
                 sleep 2
                 
                 # Пытаемся остановить еще раз
-                sudo docker stop --time=5 "$CONTAINER_ID" 2>/dev/null || true
+                sudo docker stop --timeout=5 "$CONTAINER_ID" 2>/dev/null || true
                 sleep 2
                 
                 # Принудительное удаление
