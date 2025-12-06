@@ -117,8 +117,8 @@ YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFh
 ### 6. `BOT_TOKEN`
 Токен Telegram бота от [@BotFather](https://t.me/BotFather)
 
-### 7. `CHAT_URL`
-URL чата для отправки сообщений
+### 7. `CHANNEL_URL`
+URL канала бота
 
 ### 8. `FEEDBACK_URL`
 URL для отправки обратной связи

@@ -10,7 +10,7 @@ services:
       - LLM_LOG_DIR=/app/logs
       # Переменные окружения из .env (pydantic-settings автоматически преобразует UPPER_CASE в snake_case)
       - BOT_TOKEN=${BOT_TOKEN}
-      - CHAT_URL=${CHAT_URL}
+      - CHANNEL_URL=${CHANNEL_URL}
       - FEEDBACK_URL=${FEEDBACK_URL}
       - SOS_URL=${SOS_URL}
       - ADMIN_ID=${ADMIN_ID}

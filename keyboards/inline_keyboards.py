@@ -15,7 +15,7 @@ def get_main_menu_keyboard():
         text="❓Узнать о Scribo", callback_data="info"
     )
     builder.button(
-        text="🤗Чат юзеров", url=settings.chat_url
+        text="💙Канал бота", url=settings.channel_url
     )
     builder.button(
         text="📚Отзывы о боте", url=settings.feedback_url

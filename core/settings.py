@@ -10,7 +10,7 @@ class LogLevel(str, Enum):
 
 class Settings(BaseSettings):
     bot_token: str
-    chat_url: str
+    channel_url: str
     feedback_url: str
     sos_url: str
 

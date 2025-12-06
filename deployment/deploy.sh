@@ -7,7 +7,7 @@ set -e  # Остановка при ошибке
 echo "🔄 Начинаем деплой..."
 
 # Проверяем что все переменные окружения установлены
-REQUIRED_VARS="BOT_TOKEN CHAT_URL FEEDBACK_URL SOS_URL ADMIN_ID LLM_TOKEN YC_REGISTRY_ID NEW_IMAGE YC_SA_JSON_CREDENTIALS"
+REQUIRED_VARS="BOT_TOKEN CHANNEL_URL FEEDBACK_URL SOS_URL ADMIN_ID LLM_TOKEN YC_REGISTRY_ID NEW_IMAGE YC_SA_JSON_CREDENTIALS"
 for VAR in $REQUIRED_VARS; do
   if [ -z "${!VAR}" ]; then
     echo "❌ Ошибка: переменная $VAR не установлена"
@@ -167,7 +167,7 @@ echo "🚀 Запускаем новый контейнер..."
 echo "📝 Создаем .env файл..."
 cat > "$DEPLOYMENT_DIR/.env" << EOF
 BOT_TOKEN=$BOT_TOKEN
-CHAT_URL=$CHAT_URL
+CHANNEL_URL=$CHANNEL_URL
 FEEDBACK_URL=$FEEDBACK_URL
 SOS_URL=$SOS_URL
 ADMIN_ID=$ADMIN_ID
