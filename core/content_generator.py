@@ -248,9 +248,7 @@ async def generate_work_content_stepwise(params: WorkContentParams) -> str:
     full_content = (main_content + bibliography_content).strip()
     
     # Исправляем ссылки на источники
-    full_content = fix_citations_in_work_content(full_content)
-    
-    return full_content
+    return fix_citations_in_work_content(full_content)
 
 
 async def generate_chapter_content(params: ChapterContentParams) -> str:
@@ -286,6 +284,7 @@ async def generate_chapter_content(params: ChapterContentParams) -> str:
 Объем: примерно {int(target_pages * 1250)} символов.
 Формат: LaTeX (используй \\section{{Введение}} в начале).
 НЕ используй длинные строки - разбивай на короткие (до 80 символов).
+Используй ссылки на источники через команду \\cite{{source1}}, \\cite{{source2}} и т.д. где уместно, но умеренно - по несколько ссылок на страницу.
 """
     
     elif 'заключение' in title_lower:
@@ -301,6 +300,7 @@ async def generate_chapter_content(params: ChapterContentParams) -> str:
 Объем: примерно {int(target_pages * 1250)} символов.
 Формат: LaTeX (используй \\section{{Заключение}} в начале).
 НЕ используй длинные строки - разбивай на короткие (до 80 символов).
+Используй ссылки на источники через команду \\cite{{source1}}, \\cite{{source2}} и т.д. где уместно, но умеренно - по несколько ссылок на страницу.
 """
     
     elif 'список' in title_lower or 'библиография' in title_lower:
@@ -342,6 +342,7 @@ async def generate_chapter_content(params: ChapterContentParams) -> str:
 Формат: LaTeX (используй \\section{{{chapter_title}}} в начале).
 НЕ используй длинные строки - разбивай на короткие (до 80 символов).
 Можешь включить формулы, таблицы или рисунки где уместно.
+Используй ссылки на источники через команду \\cite{{source1}}, \\cite{{source2}} и т.д. где уместно, но умеренно - по несколько ссылок на страницу.
 """
     
     return await ask_assistant(order_id, prompt, model_name)
@@ -391,6 +392,7 @@ async def generate_subsections_content(params: SubsectionsContentParams) -> str:
 - ОБЯЗАТЕЛЬНО используй \\subsection{{{subsection}}} в начале (НЕ \\section!)
 - НЕ используй длинные строки - разбивай на короткие (до 80 символов)
 - Пиши академический текст с примерами и анализом
+- Используй ссылки на источники через команду \\cite{{source1}}, \\cite{{source2}} и т.д. где уместно, но умеренно - по несколько ссылок на страницу
 
 Начни с команды \\subsection{{{subsection}}} и продолжи содержанием.
 """
@@ -436,6 +438,7 @@ async def generate_simple_work_content(order_id: int, model_name: str, theme: st
 - НЕ используй длинные строки текста - разбивай абзацы на короткие строки (максимум 80 символов)
 - После каждого предложения делай перенос строки
 - Текст должен быть академическим
+- Используй ссылки на источники через команду \\cite{{source1}}, \\cite{{source2}} и т.д. где уместно, но умеренно - по несколько ссылок на страницу
 
 Начни прямо с введения:
 """
@@ -472,9 +475,7 @@ async def generate_simple_work_content(order_id: int, model_name: str, theme: st
     full_content = main_content + "\n\n" + bibliography
     
     # Исправляем ссылки на источники
-    full_content = fix_citations_in_work_content(full_content)
-    
-    return full_content
+    return fix_citations_in_work_content(full_content)
 
 
 async def generate_full_work_content_legacy(order_id: int, model_name: str, theme: str, pages: int, work_type: str) -> str:
@@ -515,9 +516,7 @@ async def generate_full_work_content_legacy(order_id: int, model_name: str, them
     full_content = await ask_assistant(order_id, full_work_prompt, model_name)
     
     # Исправляем ссылки на источники
-    full_content = fix_citations_in_work_content(full_content)
-    
-    return full_content
+    return fix_citations_in_work_content(full_content)
 
 
 def fix_section_commands(content: str, expected_subsection_title: str) -> str:
@@ -593,8 +592,7 @@ def _extract_source_count_from_bibliography(bibliography_content: str) -> int:
         return 0
     
     # Находим максимальный номер
-    max_source_num = max(int(num) for num in matches)
-    return max_source_num
+    return max(int(num) for num in matches)
 
 
 def _replace_citations_in_content(content: str, bibliography_content: str) -> str:
@@ -630,7 +628,7 @@ def _replace_citations_in_content(content: str, bibliography_content: str) -> st
     # Сначала идем по порядку (1, 2, 3...)
     sequential_index = 0
     
-    def replace_citation(match):
+    def replace_citation(match):  # noqa: ARG001
         nonlocal sequential_index
         if sequential_index < source_count:
             # Используем последовательный номер
@@ -643,9 +641,7 @@ def _replace_citations_in_content(content: str, bibliography_content: str) -> st
         return f'\\cite{{source{source_num}}}'
     
     # Заменяем только неправильные ссылки
-    result = re.sub(cite_pattern, replace_citation, content)
-    
-    return result
+    return re.sub(cite_pattern, replace_citation, content)
 
 
 def fix_citations_in_work_content(full_content: str) -> str:
