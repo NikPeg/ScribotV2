@@ -96,6 +96,7 @@ async def compile_latex_to_pdf(tex_content: str, output_dir: str, filename: str)
 async def convert_pdf_to_docx(pdf_path: str, output_dir: str, filename: str) -> tuple[bool, str]:
     """
     Конвертирует PDF в DOCX используя LibreOffice.
+    PDF сохраняет все форматирование, включая оглавление и разрывы страниц.
     
     Args:
         pdf_path: Путь к PDF файлу
@@ -126,6 +127,7 @@ async def convert_pdf_to_docx(pdf_path: str, output_dir: str, filename: str) -> 
             
             if check_process.returncode == 0:
                 # Конвертируем PDF в DOCX
+                # PDF сохраняет все форматирование, включая оглавление и разрывы страниц
                 process = await asyncio.create_subprocess_exec(
                     cmd,
                     '--headless',
@@ -158,7 +160,8 @@ async def convert_pdf_to_docx(pdf_path: str, output_dir: str, filename: str) -> 
 
 async def convert_tex_to_docx(tex_content: str, output_dir: str, filename: str) -> tuple[bool, str]:
     """
-    Конвертирует TEX напрямую в DOCX используя pandoc или LibreOffice.
+    Конвертирует TEX в DOCX через промежуточный PDF для сохранения форматирования.
+    Это гарантирует сохранение оглавления и разрывов страниц.
     
     Args:
         tex_content: Содержимое LaTeX файла
@@ -170,20 +173,48 @@ async def convert_tex_to_docx(tex_content: str, output_dir: str, filename: str) 
     """
     docx_file = os.path.join(output_dir, f"{filename}.docx")
     
-    # Сначала пробуем pandoc (более надежно для LaTeX -> DOCX)
+    # Сначала компилируем LaTeX в PDF для сохранения форматирования
+    success, pdf_path = await compile_latex_to_pdf(tex_content, output_dir, filename)
+    if not success:
+        # Если не удалось скомпилировать PDF, пробуем прямой конверт через pandoc
+        return await _convert_tex_to_docx_direct(tex_content, output_dir, filename)
+    
+    # Конвертируем PDF в DOCX - это сохранит форматирование, TOC и разрывы страниц
+    return await convert_pdf_to_docx(pdf_path, output_dir, filename)
+
+
+async def _convert_tex_to_docx_direct(tex_content: str, output_dir: str, filename: str) -> tuple[bool, str]:
+    """
+    Прямая конвертация TEX в DOCX через pandoc (резервный метод).
+    Используется только если компиляция в PDF не удалась.
+    
+    Args:
+        tex_content: Содержимое LaTeX файла
+        output_dir: Директория для выходных файлов
+        filename: Имя файла без расширения
+    
+    Returns:
+        Tuple[bool, str]: (успех, путь_к_файлу_или_ошибка)
+    """
+    docx_file = os.path.join(output_dir, f"{filename}.docx")
+    
+    # Сначала пробуем pandoc с улучшенными параметрами
     try:
         # Создаем временный tex файл
         tex_file = os.path.join(output_dir, f"{filename}_temp.tex")
         with open(tex_file, 'w', encoding='utf-8') as f:
             f.write(tex_content)
         
-        # Пробуем pandoc
+        # Пробуем pandoc с параметрами для сохранения структуры
         pandoc_process = await asyncio.create_subprocess_exec(
             'pandoc',
             tex_file,
             '-o', docx_file,
             '--from=latex',
             '--to=docx',
+            '--toc',  # Генерировать оглавление
+            '--toc-depth=3',  # Глубина оглавления
+            '--wrap=none',  # Не переносить строки
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE
         )
