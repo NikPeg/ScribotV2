@@ -24,7 +24,7 @@ class TestPlanValidation(unittest.TestCase):
         ]
         result = count_plan_items(chapters)
         # 3 главы + 2 подраздела = 5 пунктов
-        assert result == 5
+        assert result == 5  # noqa: PLR2004
 
     def test_count_plan_items_no_subsections(self):
         """Тест: подсчет пунктов без подразделов"""
@@ -35,7 +35,7 @@ class TestPlanValidation(unittest.TestCase):
         ]
         result = count_plan_items(chapters)
         # 3 главы = 3 пункта
-        assert result == 3
+        assert result == 3  # noqa: PLR2004
 
     def test_count_plan_items_empty(self):
         """Тест: подсчет пунктов в пустом плане"""
@@ -51,7 +51,7 @@ class TestPlanValidation(unittest.TestCase):
         ]
         result = count_plan_items(chapters)
         # 2 главы + 6 подразделов = 8 пунктов
-        assert result == 8
+        assert result == 8  # noqa: PLR2004
 
     def test_validate_work_plan_valid(self):
         """Тест: валидация валидного плана"""
@@ -67,7 +67,7 @@ class TestPlanValidation(unittest.TestCase):
         # В плане: 4 главы + 4 подраздела = 8 пунктов >= 3
         is_valid, items_count = validate_work_plan(plan_text, 10)
         assert is_valid
-        assert items_count == 8
+        assert items_count == 8  # noqa: PLR2004
 
     def test_validate_work_plan_invalid(self):
         """Тест: валидация невалидного плана (слишком мало пунктов)"""
@@ -78,7 +78,7 @@ class TestPlanValidation(unittest.TestCase):
         # В плане: 3 главы = 3 пункта < 5
         is_valid, items_count = validate_work_plan(plan_text, 15)
         assert not is_valid
-        assert items_count == 3
+        assert items_count == 3  # noqa: PLR2004
 
     def test_validate_work_plan_minimum_one(self):
         """Тест: минимум всегда 1, даже для малого количества страниц"""
@@ -97,7 +97,7 @@ class TestPlanValidation(unittest.TestCase):
         # В плане: 2 главы + 1 подраздел = 3 пункта = 3
         is_valid, items_count = validate_work_plan(plan_text, 9)
         assert is_valid
-        assert items_count == 3
+        assert items_count == 3  # noqa: PLR2004
 
     def test_validate_work_plan_invalid_text(self):
         """Тест: валидация некорректного текста плана"""
@@ -130,7 +130,7 @@ class TestPlanValidation(unittest.TestCase):
         # В плане: 5 глав + 6 подразделов = 11 пунктов >= 10
         is_valid, items_count = validate_work_plan(plan_text, 30)
         assert is_valid
-        assert items_count == 11
+        assert items_count == 11  # noqa: PLR2004
 
     def test_validate_work_plan_with_bibliography(self):
         """Тест: валидация плана со списком литературы"""
@@ -145,7 +145,7 @@ class TestPlanValidation(unittest.TestCase):
         # В плане: 4 главы + 3 подраздела = 7 пунктов >= 4
         is_valid, items_count = validate_work_plan(plan_text, 12)
         assert is_valid
-        assert items_count == 7
+        assert items_count == 7  # noqa: PLR2004
 
 
 if __name__ == "__main__":
