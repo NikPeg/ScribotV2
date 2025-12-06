@@ -191,14 +191,23 @@ jobs:
             echo "⏸️  Останавливаем текущий контейнер..."
             
             # Сначала пытаемся остановить через docker-compose, если он запущен через него
+            # Проверяем оба файла: prod и обычный (на случай если старый контейнер запущен через docker-compose.yml)
             if [ -f "$DEPLOYMENT_DIR/docker-compose.prod.yml" ]; then
-              echo "🛑 Останавливаем через docker-compose..."
+              echo "🛑 Останавливаем через docker-compose.prod.yml..."
               cd "$DEPLOYMENT_DIR" || true
               # Останавливаем и удаляем контейнеры через docker-compose (более агрессивно)
               sudo docker-compose -f docker-compose.prod.yml down --remove-orphans --timeout 10 2>/dev/null || true
               sleep 3
               # Дополнительно проверяем и удаляем, если что-то осталось
               sudo docker-compose -f docker-compose.prod.yml rm -f 2>/dev/null || true
+              sleep 2
+            fi
+            
+            # Также проверяем старый docker-compose.yml (на случай если контейнер был запущен через него)
+            if [ -f "$DEPLOYMENT_DIR/docker-compose.yml" ]; then
+              echo "🛑 Останавливаем через docker-compose.yml (старый файл)..."
+              cd "$DEPLOYMENT_DIR" || true
+              sudo docker-compose -f docker-compose.yml down --remove-orphans --timeout 10 2>/dev/null || true
               sleep 2
             fi
             
