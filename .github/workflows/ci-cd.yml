@@ -73,6 +73,18 @@ jobs:
           LLM_TOKEN: "test_llm_token"
         run: |
           pytest tests/ -v --tb=short || python -m unittest discover tests -v
+      
+      - name: Test migrations
+        env:
+          BOT_TOKEN: "test_token"
+          CHAT_URL: "https://test.chat.url"
+          FEEDBACK_URL: "https://test.feedback.url"
+          SOS_URL: "https://test.sos.url"
+          ADMIN_ID: "123456789"
+          LLM_TOKEN: "test_llm_token"
+        run: |
+          echo "🧪 Тестируем миграции..."
+          pytest tests/test_migrations.py -v --tb=short
 
   build-and-push:
     name: Build and Push Docker Image
@@ -156,9 +168,25 @@ jobs:
               sudo docker ps --filter name=scribot_bot --format "table {{.Names}}\t{{.Status}}\t{{.Image}}"
               echo ""
               echo "📝 Последние логи:"
-              sudo docker logs scribot_bot --tail=10
+              sudo docker logs scribot_bot --tail=20
+              echo ""
+              echo "🔄 Проверяем применение миграций..."
+              # Проверяем, что в логах есть информация о миграциях
+              MIGRATION_LOG=$(sudo docker logs scribot_bot 2>&1 | grep -i "миграция\|migration" | tail -5 || echo "")
+              if [ -n "$MIGRATION_LOG" ]; then
+                echo "✅ Миграции применены:"
+                echo "$MIGRATION_LOG"
+              else
+                echo "⚠️ Информация о миграциях в логах не найдена (возможно, миграции уже были применены ранее)"
+              fi
+              # Проверяем, что контейнер запустился без ошибок
+              ERROR_COUNT=$(sudo docker logs scribot_bot 2>&1 | grep -i "error\|exception\|traceback" | wc -l || echo "0")
+              if [ "$ERROR_COUNT" -gt "0" ]; then
+                echo "⚠️ Найдены ошибки в логах:"
+                sudo docker logs scribot_bot 2>&1 | grep -i "error\|exception\|traceback" | tail -10
+              fi
             else
               echo "❌ ВНИМАНИЕ: Бот не работает!"
-              sudo docker logs scribot_bot --tail=30 2>&1 || echo "Логи недоступны"
+              sudo docker logs scribot_bot --tail=50 2>&1 || echo "Логи недоступны"
               exit 1
             fi
