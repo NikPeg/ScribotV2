@@ -98,21 +98,28 @@ async def process_successful_payment(message: Message, bot: Bot):  # noqa: PLR09
                 raise Exception(f"Ошибка компиляции PDF: {pdf_path}")
             
             # Конвертируем в DOCX (опционально)
+            logger.info(f"Начинаю конвертацию DOCX для заказа #{order_id}")
             success_docx, docx_path = await convert_tex_to_docx(full_tex, temp_dir, filename)
             docx_path = docx_path if success_docx else None
             
             # Если DOCX не удалось создать, уведомляем администратора
             if not success_docx:
-                error_details = docx_path if docx_path else "Неизвестная ошибка"
+                error_details = docx_path if docx_path else "Неизвестная ошибка (пустое сообщение об ошибке)"
+                logger.error(
+                    f"Ошибка при создании DOCX для заказа #{order_id}: {error_details}",
+                    exc_info=True
+                )
+                
+                # Формируем детальное сообщение для администратора
                 admin_error_message = (
                     f"🚨 <b>Ошибка при создании DOCX файла</b>\n\n"
                     f"  <b>Заказ:</b> #{order_id}\n"
                     f"  <b>Пользователь:</b> {user_id}\n"
                     f"  <b>Тема:</b> {theme[:100]}\n"
-                    f"  <b>Ошибка:</b> {error_details[:500]}"
+                    f"  <b>Временная директория:</b> {temp_dir}\n"
+                    f"  <b>Ошибка:</b> {error_details[:1000]}"
                 )
                 await send_admin_log(bot, message.from_user, admin_error_message)
-                logger.error(f"Ошибка при создании DOCX для заказа #{order_id}: {error_details}")
             
             # Отправляем файлы пользователю
             files_sent = await send_generated_files_to_user(

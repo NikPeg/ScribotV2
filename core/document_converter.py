@@ -4,6 +4,7 @@
 
 import asyncio
 import contextlib
+import logging
 import os
 import re
 
@@ -14,6 +15,9 @@ from reportlab.pdfgen import canvas
 
 # Константы
 MIN_PDF_SIZE_BYTES = 1000  # Минимальный размер PDF файла (1KB)
+
+# Логгер для модуля
+logger = logging.getLogger(__name__)
 
 
 async def compile_latex_to_pdf(tex_content: str, output_dir: str, filename: str) -> tuple[bool, str]:
@@ -108,6 +112,15 @@ async def convert_pdf_to_docx(pdf_path: str, output_dir: str, filename: str) -> 
     """
     docx_file = os.path.join(output_dir, f"{filename}.docx")
     
+    # Проверяем существование PDF файла
+    if not os.path.exists(pdf_path):
+        error_msg = f"PDF файл не найден: {pdf_path}"
+        logger.error(error_msg)
+        return False, error_msg
+    
+    pdf_size = os.path.getsize(pdf_path)
+    logger.info(f"Начинаю конвертацию PDF в DOCX: {pdf_path} (размер: {pdf_size} байт)")
+    
     libreoffice_commands = [
         'libreoffice',  # Linux/Windows в PATH
         '/Applications/LibreOffice.app/Contents/MacOS/soffice',  # macOS стандартная установка
@@ -115,19 +128,24 @@ async def convert_pdf_to_docx(pdf_path: str, output_dir: str, filename: str) -> 
         'soffice'  # Альтернативное имя
     ]
     
+    last_error = None
+    
     for cmd in libreoffice_commands:
         try:
+            logger.debug(f"Проверяю доступность команды: {cmd}")
             # Проверяем доступность команды
             check_process = await asyncio.create_subprocess_exec(
                 cmd, '--version',
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
-            await check_process.communicate()
+            check_stdout, check_stderr = await check_process.communicate()
             
             if check_process.returncode == 0:
+                logger.info(f"LibreOffice найден: {cmd}")
                 # Конвертируем PDF в DOCX
                 # PDF сохраняет все форматирование, включая оглавление и разрывы страниц
+                logger.debug(f"Запускаю конвертацию: {cmd} --headless --convert-to docx --outdir {output_dir} {pdf_path}")
                 process = await asyncio.create_subprocess_exec(
                     cmd,
                     '--headless',
@@ -138,24 +156,70 @@ async def convert_pdf_to_docx(pdf_path: str, output_dir: str, filename: str) -> 
                     stderr=asyncio.subprocess.PIPE
                 )
                 
-                _stdout, _stderr = await process.communicate()
+                stdout, stderr = await process.communicate()
+                stdout_text = stdout.decode('utf-8', errors='ignore') if stdout else ""
+                stderr_text = stderr.decode('utf-8', errors='ignore') if stderr else ""
+                
+                logger.debug(f"LibreOffice завершился с кодом: {process.returncode}")
+                if stdout_text:
+                    logger.debug(f"LibreOffice stdout: {stdout_text[:500]}")
+                if stderr_text:
+                    logger.debug(f"LibreOffice stderr: {stderr_text[:500]}")
                 
                 # LibreOffice создает файл с именем исходного PDF, но с расширением .docx
                 pdf_basename = os.path.basename(pdf_path)
                 pdf_name_without_ext = os.path.splitext(pdf_basename)[0]
                 generated_docx = os.path.join(output_dir, f"{pdf_name_without_ext}.docx")
                 
+                logger.debug(f"Ожидаемый файл: {generated_docx}, существует: {os.path.exists(generated_docx)}")
+                logger.debug(f"Целевой файл: {docx_file}, существует: {os.path.exists(docx_file)}")
+                
                 if process.returncode == 0 and os.path.exists(generated_docx):
                     # Переименовываем в нужное имя
                     if generated_docx != docx_file:
-                        with contextlib.suppress(OSError):
+                        try:
                             os.rename(generated_docx, docx_file)
-                    return True, docx_file
+                            logger.info(f"Файл переименован: {generated_docx} -> {docx_file}")
+                        except OSError as e:
+                            logger.warning(f"Не удалось переименовать файл: {e}")
+                            # Пробуем использовать существующий файл
+                            docx_file = generated_docx
                     
-        except Exception:
+                    if os.path.exists(docx_file):
+                        file_size = os.path.getsize(docx_file)
+                        logger.info(f"DOCX файл успешно создан: {docx_file} (размер: {file_size} байт)")
+                        return True, docx_file
+                    else:
+                        error_msg = f"Файл {docx_file} не существует после переименования"
+                        logger.error(error_msg)
+                        last_error = error_msg
+                else:
+                    error_msg = (
+                        f"LibreOffice конвертация не удалась. "
+                        f"Код возврата: {process.returncode}, "
+                        f"Файл существует: {os.path.exists(generated_docx)}, "
+                        f"stdout: {stdout_text[:200]}, "
+                        f"stderr: {stderr_text[:200]}"
+                    )
+                    logger.error(error_msg)
+                    last_error = error_msg
+            else:
+                logger.debug(f"Команда {cmd} недоступна (код возврата: {check_process.returncode})")
+                check_stderr_text = check_stderr.decode('utf-8', errors='ignore') if check_stderr else ""
+                last_error = f"Команда {cmd} недоступна: {check_stderr_text[:200]}"
+                    
+        except FileNotFoundError:
+            logger.debug(f"Команда {cmd} не найдена")
+            last_error = f"Команда {cmd} не найдена в PATH"
+            continue
+        except Exception as e:
+            logger.error(f"Ошибка при попытке использовать {cmd}: {e}", exc_info=True)
+            last_error = f"Ошибка при использовании {cmd}: {str(e)}"
             continue
     
-    return False, "LibreOffice не найден или не может конвертировать PDF в DOCX"
+    error_msg = f"LibreOffice не найден или не может конвертировать PDF в DOCX. Последняя ошибка: {last_error}"
+    logger.error(error_msg)
+    return False, error_msg
 
 
 async def convert_tex_to_docx(tex_content: str, output_dir: str, filename: str) -> tuple[bool, str]:
@@ -171,13 +235,21 @@ async def convert_tex_to_docx(tex_content: str, output_dir: str, filename: str) 
     Returns:
         Tuple[bool, str]: (успех, путь_к_файлу_или_ошибка)
     """
+    logger.info(f"Начинаю конвертацию TEX в DOCX для файла: {filename}")
+    
     # Сначала компилируем LaTeX в PDF для сохранения форматирования
+    logger.debug("Шаг 1: Компиляция LaTeX в PDF")
     success, pdf_path = await compile_latex_to_pdf(tex_content, output_dir, filename)
     if not success:
+        logger.warning(f"Не удалось скомпилировать LaTeX в PDF: {pdf_path[:500]}")
+        logger.info("Пробую прямой конверт через pandoc")
         # Если не удалось скомпилировать PDF, пробуем прямой конверт через pandoc
         return await _convert_tex_to_docx_direct(tex_content, output_dir, filename)
     
+    logger.info(f"PDF успешно скомпилирован: {pdf_path}")
+    
     # Конвертируем PDF в DOCX - это сохранит форматирование, TOC и разрывы страниц
+    logger.debug("Шаг 2: Конвертация PDF в DOCX")
     return await convert_pdf_to_docx(pdf_path, output_dir, filename)
 
 
@@ -194,16 +266,19 @@ async def _convert_tex_to_docx_direct(tex_content: str, output_dir: str, filenam
     Returns:
         Tuple[bool, str]: (успех, путь_к_файлу_или_ошибка)
     """
+    logger.info("Пробую прямую конвертацию TEX в DOCX через pandoc")
     docx_file = os.path.join(output_dir, f"{filename}.docx")
     
     # Сначала пробуем pandoc с улучшенными параметрами
     try:
         # Создаем временный tex файл
         tex_file = os.path.join(output_dir, f"{filename}_temp.tex")
+        logger.debug(f"Создаю временный TEX файл: {tex_file}")
         with open(tex_file, 'w', encoding='utf-8') as f:
             f.write(tex_content)
         
         # Пробуем pandoc с параметрами для сохранения структуры
+        logger.debug(f"Запускаю pandoc: pandoc {tex_file} -o {docx_file}")
         pandoc_process = await asyncio.create_subprocess_exec(
             'pandoc',
             tex_file,
@@ -217,19 +292,39 @@ async def _convert_tex_to_docx_direct(tex_content: str, output_dir: str, filenam
             stderr=asyncio.subprocess.PIPE
         )
         
-        _stdout, _stderr = await pandoc_process.communicate()
+        stdout, stderr = await pandoc_process.communicate()
+        stdout_text = stdout.decode('utf-8', errors='ignore') if stdout else ""
+        stderr_text = stderr.decode('utf-8', errors='ignore') if stderr else ""
+        
+        logger.debug(f"Pandoc завершился с кодом: {pandoc_process.returncode}")
+        if stdout_text:
+            logger.debug(f"Pandoc stdout: {stdout_text[:500]}")
+        if stderr_text:
+            logger.debug(f"Pandoc stderr: {stderr_text[:500]}")
         
         if pandoc_process.returncode == 0 and os.path.exists(docx_file):
+            file_size = os.path.getsize(docx_file)
+            logger.info(f"DOCX успешно создан через pandoc: {docx_file} (размер: {file_size} байт)")
             # Удаляем временный файл
             with contextlib.suppress(OSError):
                 os.remove(tex_file)
             return True, docx_file
+        else:
+            error_msg = (
+                f"Pandoc конвертация не удалась. "
+                f"Код возврата: {pandoc_process.returncode}, "
+                f"Файл существует: {os.path.exists(docx_file)}, "
+                f"stderr: {stderr_text[:500]}"
+            )
+            logger.warning(error_msg)
             
-    except Exception:
-        # pandoc не найден или не работает, пробуем LibreOffice
-        pass
+    except FileNotFoundError:
+        logger.warning("Pandoc не найден в PATH")
+    except Exception as e:
+        logger.error(f"Ошибка при использовании pandoc: {e}", exc_info=True)
     
     # Если pandoc не сработал, пробуем LibreOffice через ODT
+    logger.info("Pandoc не сработал, пробую LibreOffice")
     return await _convert_via_libreoffice(tex_content, output_dir, filename)
 
 
