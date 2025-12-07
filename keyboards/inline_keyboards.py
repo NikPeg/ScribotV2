@@ -96,7 +96,7 @@ def get_model_keyboard():
         InlineKeyboardButton(text=f"Gemini ({gemini_price}⭐️)", callback_data=f"model:{gemini_model}"),  # 1,05M context $0,10/M input tokens $0,40/M output tokens
         InlineKeyboardButton(text=f"DeepSeek ({deepseek_price}⭐️)", callback_data=f"model:{deepseek_model}"),  # 8K context $0,15/M input tokens $0,70/M output tokens
         InlineKeyboardButton(text=f"ChatGPT ({chatgpt_price}⭐️)", callback_data=f"model:{chatgpt_model}"),  # 128K context $0,15/M input tokens $0,60/M output tokens
-        InlineKeyboardButton(text="🧪 ТЕСТ", callback_data="model:TEST"),
+        # InlineKeyboardButton(text="🧪 ТЕСТ", callback_data="model:TEST"),
         InlineKeyboardButton(text="⬅️ Назад", callback_data="back_to_type"),
     ]
 
