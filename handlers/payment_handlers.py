@@ -82,6 +82,17 @@ async def process_successful_payment(message: Message, bot: Bot):  # noqa: PLR09
         theme = order_info['theme']
         full_tex = order_info['full_tex']
         
+        # Уведомляем администратора об оплате СРАЗУ после оплаты
+        admin_message = (
+            f"💰 <b>Оплата получена</b>\n\n"
+            f"  <b>Пользователь:</b> {message.from_user.full_name} (@{message.from_user.username or 'нет'})\n"
+            f"  <b>User ID:</b> {user_id}\n"
+            f"  <b>Заказ:</b> #{order_id}\n"
+            f"  <b>Тема:</b> {theme[:100]}\n"
+            f"  <b>Сумма:</b> {payment.total_amount} ⭐"
+        )
+        await send_admin_log(bot, message.from_user, admin_message)
+        
         # Уведомляем пользователя о начале генерации
         processing_message = await message.answer(
             "⏳ Обрабатываю оплату... Генерирую полную версию работы..."
@@ -95,6 +106,17 @@ async def process_successful_payment(message: Message, bot: Bot):  # noqa: PLR09
             # Компилируем полный PDF
             success, pdf_path = await compile_latex_to_pdf(full_tex, temp_dir, filename)
             if not success:
+                # Отправляем ошибку конвертации PDF администратору
+                error_details = pdf_path if pdf_path else "Неизвестная ошибка (пустое сообщение об ошибке)"
+                admin_error_message = (
+                    f"🚨 <b>Ошибка при компиляции PDF</b>\n\n"
+                    f"  <b>Заказ:</b> #{order_id}\n"
+                    f"  <b>Пользователь:</b> {user_id}\n"
+                    f"  <b>Тема:</b> {theme[:100]}\n"
+                    f"  <b>Временная директория:</b> {temp_dir}\n"
+                    f"  <b>Ошибка:</b> {error_details[:2000]}"
+                )
+                await send_admin_log(bot, message.from_user, admin_error_message)
                 raise Exception(f"Ошибка компиляции PDF: {pdf_path}")
             
             # Конвертируем в DOCX (опционально)
@@ -144,17 +166,6 @@ async def process_successful_payment(message: Message, bot: Bot):  # noqa: PLR09
             success_message += "🎉 Спасибо за оплату! Полная версия работы отправлена."
             await message.answer(success_message)
             
-            # Уведомляем администратора
-            admin_message = (
-                f"💰 <b>Оплата получена</b>\n\n"
-                f"  <b>Пользователь:</b> {message.from_user.full_name} (@{message.from_user.username or 'нет'})\n"
-                f"  <b>User ID:</b> {user_id}\n"
-                f"  <b>Заказ:</b> #{order_id}\n"
-                f"  <b>Тема:</b> {theme[:100]}\n"
-                f"  <b>Сумма:</b> {payment.total_amount} ⭐"
-            )
-            await send_admin_log(bot, message.from_user, admin_message)
-            
             logger.info(f"Успешная оплата обработана для заказа #{order_id}, пользователь {user_id}")
             
         except Exception as e:
@@ -165,13 +176,13 @@ async def process_successful_payment(message: Message, bot: Bot):  # noqa: PLR09
                 "Администратор уведомлен и скоро пришлет вам работу."
             )
             
-            # Уведомляем администратора об ошибке
+            # Уведомляем администратора об ошибке (если еще не было отправлено сообщение об ошибке PDF)
             error_message = (
                 f"🚨 <b>Ошибка при обработке оплаты</b>\n\n"
                 f"  <b>Заказ:</b> #{order_id}\n"
                 f"  <b>Пользователь:</b> {user_id}\n"
                 f"  <b>Тема:</b> {theme[:100]}\n"
-                f"  <b>Ошибка:</b> {str(e)[:200]}"
+                f"  <b>Ошибка:</b> {str(e)[:2000]}"
             )
             await send_admin_log(bot, message.from_user, error_message)
         
