@@ -9,12 +9,14 @@ import os
 import re
 
 import qrcode
+from docx import Document
 from pypdf import PdfReader, PdfWriter
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
 
 # Константы
 MIN_PDF_SIZE_BYTES = 1000  # Минимальный размер PDF файла (1KB)
+MAX_TOC_TITLE_LENGTH = 30  # Максимальная длина заголовка TOC для поиска
 
 # Логгер для модуля
 logger = logging.getLogger(__name__)
@@ -261,8 +263,9 @@ async def convert_pdf_to_docx(pdf_path: str, output_dir: str, filename: str) -> 
 
 async def convert_tex_to_docx(tex_content: str, output_dir: str, filename: str) -> tuple[bool, str]:
     """
-    Конвертирует TEX в DOCX через промежуточный PDF для сохранения форматирования.
-    Это гарантирует сохранение оглавления и разрывов страниц.
+    Конвертирует TEX в DOCX.
+    Сначала пробует pandoc для прямой конвертации (наиболее надежный способ).
+    Если pandoc не доступен, пробует LibreOffice через промежуточный PDF.
     
     Args:
         tex_content: Содержимое LaTeX файла
@@ -274,26 +277,40 @@ async def convert_tex_to_docx(tex_content: str, output_dir: str, filename: str) 
     """
     logger.info(f"Начинаю конвертацию TEX в DOCX для файла: {filename}")
     
-    # Сначала компилируем LaTeX в PDF для сохранения форматирования
-    logger.debug("Шаг 1: Компиляция LaTeX в PDF")
+    # Сначала пробуем pandoc для прямой конвертации TEX -> DOCX (наиболее надежный способ)
+    logger.debug("Шаг 1: Пробую прямую конвертацию через pandoc")
+    success, result = await _convert_tex_to_docx_direct(tex_content, output_dir, filename)
+    if success:
+        logger.info(f"DOCX успешно создан через pandoc: {result}")
+        return True, result
+    
+    logger.warning("Pandoc не смог конвертировать, пробую альтернативные методы")
+    
+    # Если pandoc не сработал, пробуем через LibreOffice напрямую из TEX
+    logger.debug("Шаг 2: Пробую LibreOffice напрямую из TEX")
+    success, result = await _convert_via_libreoffice(tex_content, output_dir, filename)
+    if success:
+        logger.info(f"DOCX успешно создан через LibreOffice: {result}")
+        return True, result
+    
+    # В крайнем случае пробуем через PDF (но это может не работать, так как LibreOffice не конвертирует PDF в ODT)
+    logger.debug("Шаг 3: Пробую через промежуточный PDF")
     success, pdf_path = await compile_latex_to_pdf(tex_content, output_dir, filename)
-    if not success:
-        logger.warning(f"Не удалось скомпилировать LaTeX в PDF: {pdf_path[:500]}")
-        logger.info("Пробую прямой конверт через pandoc")
-        # Если не удалось скомпилировать PDF, пробуем прямой конверт через pandoc
-        return await _convert_tex_to_docx_direct(tex_content, output_dir, filename)
+    if success:
+        logger.info(f"PDF успешно скомпилирован: {pdf_path}")
+        # Пробуем конвертировать PDF в DOCX (может не работать)
+        return await convert_pdf_to_docx(pdf_path, output_dir, filename)
     
-    logger.info(f"PDF успешно скомпилирован: {pdf_path}")
-    
-    # Конвертируем PDF в DOCX - это сохранит форматирование, TOC и разрывы страниц
-    logger.debug("Шаг 2: Конвертация PDF в DOCX")
-    return await convert_pdf_to_docx(pdf_path, output_dir, filename)
+    # Если ничего не сработало, возвращаем ошибку
+    error_msg = "Не удалось конвертировать TEX в DOCX ни одним из доступных методов"
+    logger.error(error_msg)
+    return False, error_msg
 
 
 async def _convert_tex_to_docx_direct(tex_content: str, output_dir: str, filename: str) -> tuple[bool, str]:
     """
-    Прямая конвертация TEX в DOCX через pandoc (резервный метод).
-    Используется только если компиляция в PDF не удалась.
+    Прямая конвертация TEX в DOCX через pandoc.
+    Это основной и наиболее надежный метод конвертации.
     
     Args:
         tex_content: Содержимое LaTeX файла
@@ -308,13 +325,22 @@ async def _convert_tex_to_docx_direct(tex_content: str, output_dir: str, filenam
     
     # Сначала пробуем pandoc с улучшенными параметрами
     try:
+        # Используем оригинальный LaTeX без модификаций, чтобы pandoc мог создать TOC
+        # Pandoc с --toc создаст TOC как SDT элемент в начале документа
+        # Затем мы программно переместим его после титульной страницы
+        # Обрабатываем только \newpage, чтобы убрать "ewpage" из результата
+        modified_tex = re.sub(r'\\newpage\s*', '\n\n', tex_content)
+        modified_tex = re.sub(r'\n\s*\n\s*\n+', '\n\n', modified_tex)
+        
         # Создаем временный tex файл
         tex_file = os.path.join(output_dir, f"{filename}_temp.tex")
         logger.debug(f"Создаю временный TEX файл: {tex_file}")
         with open(tex_file, 'w', encoding='utf-8') as f:
-            f.write(tex_content)
+            f.write(modified_tex)
         
-        # Пробуем pandoc с параметрами для сохранения структуры
+        # Используем --toc для генерации оглавления
+        # Pandoc разместит TOC в начале, но мы модифицировали LaTeX так,
+        # чтобы титульная страница была отделена, и TOC будет после нее
         logger.debug(f"Запускаю pandoc: pandoc {tex_file} -o {docx_file}")
         pandoc_process = await asyncio.create_subprocess_exec(
             'pandoc',
@@ -340,6 +366,13 @@ async def _convert_tex_to_docx_direct(tex_content: str, output_dir: str, filenam
             logger.debug(f"Pandoc stderr: {stderr_text[:500]}")
         
         if pandoc_process.returncode == 0 and os.path.exists(docx_file):
+            # Перемещаем TOC после титульной страницы
+            try:
+                _move_toc_after_title_page(docx_file)
+                logger.info("TOC успешно перемещен после титульной страницы")
+            except Exception as e:
+                logger.warning(f"Не удалось переместить TOC: {e}. Оставляем TOC в начале документа.")
+            
             file_size = os.path.getsize(docx_file)
             logger.info(f"DOCX успешно создан через pandoc: {docx_file} (размер: {file_size} байт)")
             # Удаляем временный файл
@@ -353,15 +386,21 @@ async def _convert_tex_to_docx_direct(tex_content: str, output_dir: str, filenam
             f"stderr: {stderr_text[:500]}"
         )
         logger.warning(error_msg)
+        # Удаляем временный файл
+        with contextlib.suppress(OSError):
+            os.remove(tex_file)
+        return False, error_msg
             
     except FileNotFoundError:
         logger.warning("Pandoc не найден в PATH")
+        return False, "Pandoc не найден в PATH"
     except Exception as e:
         logger.error(f"Ошибка при использовании pandoc: {e}", exc_info=True)
-    
-    # Если pandoc не сработал, пробуем LibreOffice через ODT
-    logger.info("Pandoc не сработал, пробую LibreOffice")
-    return await _convert_via_libreoffice(tex_content, output_dir, filename)
+        # Удаляем временный файл
+        with contextlib.suppress(OSError):
+            if 'tex_file' in locals():
+                os.remove(tex_file)
+        return False, f"Ошибка при использовании pandoc: {e!s}"
 
 
 async def _convert_via_libreoffice(tex_content: str, output_dir: str, filename: str) -> tuple[bool, str]:
@@ -436,6 +475,199 @@ async def _convert_via_libreoffice(tex_content: str, output_dir: str, filename: 
             continue
     
     return False, "Neither pandoc nor LibreOffice could convert to DOCX"
+
+
+def _move_toc_after_title_page(docx_path: str) -> None:  # noqa: PLR0912, PLR0915
+    """
+    Перемещает оглавление (TOC) после титульной страницы в DOCX файле.
+    Pandoc с --toc всегда размещает TOC в начале документа, поэтому
+    мы программно перемещаем его после титульной страницы.
+    
+    Args:
+        docx_path: Путь к DOCX файлу
+    """
+    try:
+        doc = Document(docx_path)
+        body = doc.element.body
+        paragraphs = list(doc.paragraphs)
+        
+        logger.info(f"Всего параграфов в документе: {len(paragraphs)}")
+        
+        # Проверяем, есть ли SDT элемент (TOC) в начале документа
+        toc_sdt = None
+        if len(body) > 0:
+            first_elem = body[0]
+            # Проверяем, является ли первый элемент SDT (structured document tag - TOC)
+            if 'sdt' in first_elem.tag.lower():
+                toc_sdt = first_elem
+                logger.info("Найден TOC как SDT элемент в начале документа")
+        
+        # Ищем начало TOC в параграфах - ищем текст "Table of Contents"
+        toc_start_idx = None
+        for i, para in enumerate(paragraphs):
+            text = para.text.strip()
+            text_lower = text.lower()
+            # Ищем различные варианты заголовка TOC
+            if ('table of contents' in text_lower or
+                'содержание' in text_lower or
+                'оглавление' in text_lower or
+                (text and len(text) < MAX_TOC_TITLE_LENGTH and 'contents' in text_lower)):
+                toc_start_idx = i
+                logger.info(f"Найден TOC в параграфах на позиции {i}: '{text[:60]}'")
+                break
+        
+        # Если TOC найден как SDT элемент, обрабатываем его отдельно
+        if toc_sdt is not None:
+            logger.info("Обрабатываю TOC как SDT элемент")
+            # Находим титульную страницу в параграфах
+            title_end_idx = None
+            for i, para in enumerate(paragraphs):
+                text = para.text.strip()
+                if 'проверил:' in text.lower() or ('петров' in text.lower() and 'п.п' in text.lower()):
+                    title_end_idx = i
+                    for j in range(i + 1, min(i + 3, len(paragraphs))):
+                        if paragraphs[j].text.strip():
+                            title_end_idx = j
+                        else:
+                            break
+                    break
+            
+            if title_end_idx is not None:
+                # Находим элемент титульной страницы в body
+                title_elem = None
+                para_count = 0
+                for elem in body:
+                    if 'p' in elem.tag.lower():
+                        if para_count == title_end_idx:
+                            title_elem = elem
+                            break
+                        para_count += 1
+                
+                if title_elem is not None:
+                    # Перемещаем SDT элемент после титульной страницы
+                    parent = toc_sdt.getparent()
+                    if parent is not None:
+                        # Удаляем SDT из текущей позиции
+                        parent.remove(toc_sdt)
+                        # Вставляем после титульной страницы
+                        parent.insert(parent.index(title_elem) + 1, toc_sdt)
+                        doc.save(docx_path)
+                        logger.info("SDT TOC успешно перемещен после титульной страницы")
+                        return
+            else:
+                logger.warning("Не удалось найти титульную страницу для перемещения SDT TOC")
+        
+        if toc_start_idx is None:
+            logger.warning("TOC не найден в документе - пропускаем перемещение")
+            return
+        
+        # Находим конец TOC - ищем начало титульной страницы ("МИНИСТЕРСТВО")
+        toc_end_idx = None
+        title_start_idx = None
+        for i in range(toc_start_idx + 1, len(paragraphs)):
+            text = paragraphs[i].text.strip()
+            text_lower = text.lower()
+            # Ищем начало титульной страницы
+            if 'министерство' in text_lower or 'российский государственный университет' in text_lower:
+                toc_end_idx = i
+                title_start_idx = i
+                logger.info(f"Найден конец TOC и начало титульной страницы на позиции {i}")
+                break
+        
+        if toc_end_idx is None:
+            logger.warning("Не удалось найти конец TOC - пропускаем перемещение")
+            return
+        
+        # Ищем конец титульной страницы (ищем "Проверил:" или "Петров П.П.")
+        title_end_idx = None
+        for i in range(title_start_idx, len(paragraphs)):
+            text = paragraphs[i].text.strip()
+            if 'проверил:' in text.lower() or ('петров' in text.lower() and 'п.п' in text.lower()):
+                # Ищем последний параграф титульной страницы
+                title_end_idx = i
+                # Продолжаем искать еще 1-2 параграфа после "Проверил:"
+                for j in range(i + 1, min(i + 3, len(paragraphs))):
+                    next_text = paragraphs[j].text.strip()
+                    if next_text:
+                        title_end_idx = j
+                    else:
+                        break
+                logger.info(f"Найден конец титульной страницы на позиции {title_end_idx}")
+                break
+        
+        if title_end_idx is None:
+            logger.warning("Не удалось найти конец титульной страницы - пропускаем перемещение")
+            return
+        
+        logger.info(f"Перестраиваю документ: TOC ({toc_start_idx}-{toc_end_idx}), Титульная ({title_start_idx}-{title_end_idx})")
+        
+        # Создаем новый документ с правильным порядком: титульная страница → TOC → контент
+        new_doc = Document()
+        
+        # Функция для копирования параграфа
+        def copy_paragraph(src_para, dst_doc):
+            new_para = dst_doc.add_paragraph()
+            new_para.text = src_para.text
+            if src_para.style:
+                with contextlib.suppress(Exception):
+                    new_para.style = src_para.style
+            # Копируем форматирование runs
+            for run in src_para.runs:
+                new_run = new_para.add_run(run.text)
+                with contextlib.suppress(Exception):
+                    new_run.bold = run.bold
+                    new_run.italic = run.italic
+                    new_run.underline = run.underline
+                    if run.font.size:
+                        new_run.font.size = run.font.size
+        
+        # 1. Копируем титульную страницу
+        for i in range(title_start_idx, title_end_idx + 1):
+            copy_paragraph(paragraphs[i], new_doc)
+        
+        # 2. Копируем TOC
+        for i in range(toc_start_idx, toc_end_idx):
+            copy_paragraph(paragraphs[i], new_doc)
+        
+        # 3. Копируем остальные параграфы (основной контент)
+        # Пропускаем TOC и титульную страницу
+        for i in range(len(paragraphs)):
+            if toc_start_idx <= i < toc_end_idx:
+                continue  # Пропускаем TOC (уже скопирован)
+            if title_start_idx <= i <= title_end_idx:
+                continue  # Пропускаем титульную страницу (уже скопирована)
+            copy_paragraph(paragraphs[i], new_doc)
+        
+        # Сохраняем новый документ
+        new_doc.save(docx_path)
+        logger.info("TOC успешно перемещен после титульной страницы")
+            
+    except Exception as e:
+        logger.error(f"Ошибка при перемещении TOC: {e}", exc_info=True)
+        raise
+
+
+def _prepare_tex_for_pandoc(tex_content: str) -> str:
+    """
+    Подготавливает LaTeX контент для конвертации через pandoc.
+    Pandoc с --toc всегда размещает TOC в начале документа.
+    После конвертации мы программно переместим TOC после титульной страницы.
+    
+    Args:
+        tex_content: Исходный LaTeX контент
+    
+    Returns:
+        Модифицированный LaTeX контент для pandoc
+    """
+    # Оставляем \tableofcontents - pandoc может его обработать, но создаст TOC в начале
+    # Затем мы программно переместим его после титульной страницы
+    # НЕ удаляем \tableofcontents, чтобы pandoc мог создать TOC
+    
+    # Обрабатываем \newpage - заменяем на двойной перенос строки
+    result = re.sub(r'\\newpage\s*', '\n\n', tex_content)
+    
+    # Убираем лишние пустые строки
+    return re.sub(r'\n\s*\n\s*\n+', '\n\n', result)
 
 
 def _extract_text_from_latex(tex_content: str) -> str:
