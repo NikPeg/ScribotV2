@@ -99,8 +99,8 @@ async def compile_latex_to_pdf(tex_content: str, output_dir: str, filename: str)
 
 async def convert_pdf_to_docx(pdf_path: str, output_dir: str, filename: str) -> tuple[bool, str]:  # noqa: PLR0912, PLR0915
     """
-    Конвертирует PDF в DOCX используя LibreOffice.
-    PDF сохраняет все форматирование, включая оглавление и разрывы страниц.
+    Конвертирует PDF в DOCX используя LibreOffice через промежуточный формат ODT.
+    LibreOffice не может напрямую конвертировать PDF в DOCX, поэтому используем ODT как промежуточный формат.
     
     Args:
         pdf_path: Путь к PDF файлу
@@ -119,7 +119,7 @@ async def convert_pdf_to_docx(pdf_path: str, output_dir: str, filename: str) -> 
         return False, error_msg
     
     pdf_size = os.path.getsize(pdf_path)
-    logger.info(f"Начинаю конвертацию PDF в DOCX: {pdf_path} (размер: {pdf_size} байт)")
+    logger.info(f"Начинаю конвертацию PDF в DOCX через ODT: {pdf_path} (размер: {pdf_size} байт)")
     
     libreoffice_commands = [
         'libreoffice',  # Linux/Windows в PATH
@@ -143,38 +143,76 @@ async def convert_pdf_to_docx(pdf_path: str, output_dir: str, filename: str) -> 
             
             if check_process.returncode == 0:
                 logger.info(f"LibreOffice найден: {cmd}")
-                # Конвертируем PDF в DOCX
-                # PDF сохраняет все форматирование, включая оглавление и разрывы страниц
-                logger.debug(f"Запускаю конвертацию: {cmd} --headless --convert-to docx --outdir {output_dir} {pdf_path}")
-                process = await asyncio.create_subprocess_exec(
+                
+                # Шаг 1: Конвертируем PDF в ODT (LibreOffice может это делать)
+                pdf_basename = os.path.basename(pdf_path)
+                pdf_name_without_ext = os.path.splitext(pdf_basename)[0]
+                odt_file = os.path.join(output_dir, f"{pdf_name_without_ext}.odt")
+                
+                logger.debug(f"Шаг 1: Конвертация PDF в ODT: {cmd} --headless --convert-to odt --outdir {output_dir} {pdf_path}")
+                process_odt = await asyncio.create_subprocess_exec(
                     cmd,
                     '--headless',
-                    '--convert-to', 'docx',
+                    '--convert-to', 'odt',
                     '--outdir', output_dir,
                     pdf_path,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE
                 )
                 
-                stdout, stderr = await process.communicate()
-                stdout_text = stdout.decode('utf-8', errors='ignore') if stdout else ""
-                stderr_text = stderr.decode('utf-8', errors='ignore') if stderr else ""
+                stdout_odt, stderr_odt = await process_odt.communicate()
+                _stdout_odt_text = stdout_odt.decode('utf-8', errors='ignore') if stdout_odt else ""
+                stderr_odt_text = stderr_odt.decode('utf-8', errors='ignore') if stderr_odt else ""
                 
-                logger.debug(f"LibreOffice завершился с кодом: {process.returncode}")
-                if stdout_text:
-                    logger.debug(f"LibreOffice stdout: {stdout_text[:500]}")
-                if stderr_text:
-                    logger.debug(f"LibreOffice stderr: {stderr_text[:500]}")
+                logger.debug(f"PDF->ODT завершился с кодом: {process_odt.returncode}")
+                if stderr_odt_text:
+                    logger.debug(f"PDF->ODT stderr: {stderr_odt_text[:500]}")
                 
-                # LibreOffice создает файл с именем исходного PDF, но с расширением .docx
-                pdf_basename = os.path.basename(pdf_path)
-                pdf_name_without_ext = os.path.splitext(pdf_basename)[0]
+                if process_odt.returncode != 0 or not os.path.exists(odt_file):
+                    error_msg = (
+                        f"Не удалось конвертировать PDF в ODT. "
+                        f"Код возврата: {process_odt.returncode}, "
+                        f"Файл существует: {os.path.exists(odt_file)}, "
+                        f"stderr: {stderr_odt_text[:500]}"
+                    )
+                    logger.warning(error_msg)
+                    last_error = error_msg
+                    continue
+                
+                logger.info(f"ODT файл создан: {odt_file}")
+                
+                # Шаг 2: Конвертируем ODT в DOCX
+                logger.debug(f"Шаг 2: Конвертация ODT в DOCX: {cmd} --headless --convert-to docx --outdir {output_dir} {odt_file}")
+                process_docx = await asyncio.create_subprocess_exec(
+                    cmd,
+                    '--headless',
+                    '--convert-to', 'docx',
+                    '--outdir', output_dir,
+                    odt_file,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE
+                )
+                
+                stdout_docx, stderr_docx = await process_docx.communicate()
+                stdout_docx_text = stdout_docx.decode('utf-8', errors='ignore') if stdout_docx else ""
+                stderr_docx_text = stderr_docx.decode('utf-8', errors='ignore') if stderr_docx else ""
+                
+                logger.debug(f"ODT->DOCX завершился с кодом: {process_docx.returncode}")
+                if stderr_docx_text:
+                    logger.debug(f"ODT->DOCX stderr: {stderr_docx_text[:500]}")
+                
+                # LibreOffice создает файл с именем исходного ODT, но с расширением .docx
                 generated_docx = os.path.join(output_dir, f"{pdf_name_without_ext}.docx")
                 
                 logger.debug(f"Ожидаемый файл: {generated_docx}, существует: {os.path.exists(generated_docx)}")
                 logger.debug(f"Целевой файл: {docx_file}, существует: {os.path.exists(docx_file)}")
                 
-                if process.returncode == 0 and os.path.exists(generated_docx):
+                # Удаляем промежуточный ODT файл
+                with contextlib.suppress(OSError):
+                    os.remove(odt_file)
+                    logger.debug(f"Промежуточный ODT файл удален: {odt_file}")
+                
+                if process_docx.returncode == 0 and os.path.exists(generated_docx):
                     # Переименовываем в нужное имя
                     if generated_docx != docx_file:
                         try:
@@ -194,11 +232,11 @@ async def convert_pdf_to_docx(pdf_path: str, output_dir: str, filename: str) -> 
                     last_error = error_msg
                 else:
                     error_msg = (
-                        f"LibreOffice конвертация не удалась. "
-                        f"Код возврата: {process.returncode}, "
+                        f"LibreOffice конвертация ODT->DOCX не удалась. "
+                        f"Код возврата: {process_docx.returncode}, "
                         f"Файл существует: {os.path.exists(generated_docx)}, "
-                        f"stdout: {stdout_text[:200]}, "
-                        f"stderr: {stderr_text[:200]}"
+                        f"stdout: {stdout_docx_text[:200]}, "
+                        f"stderr: {stderr_docx_text[:200]}"
                     )
                     logger.error(error_msg)
                     last_error = error_msg
