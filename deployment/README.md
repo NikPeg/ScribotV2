@@ -6,8 +6,40 @@
 
 - `Dockerfile` - образ Docker для приложения
 - `docker-compose.yml` - конфигурация Docker Compose для запуска приложения
+- `docker-compose.prod.yml` - конфигурация для production окружения
 
-## Использование
+## Установка и настройка
+
+### Требования
+
+- Python 3.11 или выше
+- LaTeX дистрибутив (для компиляции LaTeX в PDF)
+- pdflatex в PATH
+- Docker и Docker Compose (для деплоя через Docker)
+
+### Установка зависимостей
+
+```bash
+pip install -r requirements/requirements.txt
+```
+
+### Настройка переменных окружения
+
+Создайте файл `.env` в корне проекта на основе [.env.example](../.env.example)
+
+### Инициализация базы данных
+
+База данных инициализируется автоматически при первом запуске. Миграции применяются автоматически через `migration_manager.py`.
+
+## Запуск
+
+### Локальный запуск
+
+```bash
+python main.py
+```
+
+### Запуск через Docker
 
 Для запуска приложения с помощью Docker Compose:
 
