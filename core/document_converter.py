@@ -97,7 +97,7 @@ async def compile_latex_to_pdf(tex_content: str, output_dir: str, filename: str)
         return False, f"Exception during LaTeX compilation: {e!s}"
 
 
-async def convert_pdf_to_docx(pdf_path: str, output_dir: str, filename: str) -> tuple[bool, str]:
+async def convert_pdf_to_docx(pdf_path: str, output_dir: str, filename: str) -> tuple[bool, str]:  # noqa: PLR0912, PLR0915
     """
     Конвертирует PDF в DOCX используя LibreOffice.
     PDF сохраняет все форматирование, включая оглавление и разрывы страниц.
@@ -139,7 +139,7 @@ async def convert_pdf_to_docx(pdf_path: str, output_dir: str, filename: str) -> 
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
-            check_stdout, check_stderr = await check_process.communicate()
+            _check_stdout, check_stderr = await check_process.communicate()
             
             if check_process.returncode == 0:
                 logger.info(f"LibreOffice найден: {cmd}")
@@ -189,10 +189,9 @@ async def convert_pdf_to_docx(pdf_path: str, output_dir: str, filename: str) -> 
                         file_size = os.path.getsize(docx_file)
                         logger.info(f"DOCX файл успешно создан: {docx_file} (размер: {file_size} байт)")
                         return True, docx_file
-                    else:
-                        error_msg = f"Файл {docx_file} не существует после переименования"
-                        logger.error(error_msg)
-                        last_error = error_msg
+                    error_msg = f"Файл {docx_file} не существует после переименования"
+                    logger.error(error_msg)
+                    last_error = error_msg
                 else:
                     error_msg = (
                         f"LibreOffice конвертация не удалась. "
@@ -214,7 +213,7 @@ async def convert_pdf_to_docx(pdf_path: str, output_dir: str, filename: str) -> 
             continue
         except Exception as e:
             logger.error(f"Ошибка при попытке использовать {cmd}: {e}", exc_info=True)
-            last_error = f"Ошибка при использовании {cmd}: {str(e)}"
+            last_error = f"Ошибка при использовании {cmd}: {e!s}"
             continue
     
     error_msg = f"LibreOffice не найден или не может конвертировать PDF в DOCX. Последняя ошибка: {last_error}"
@@ -309,14 +308,13 @@ async def _convert_tex_to_docx_direct(tex_content: str, output_dir: str, filenam
             with contextlib.suppress(OSError):
                 os.remove(tex_file)
             return True, docx_file
-        else:
-            error_msg = (
-                f"Pandoc конвертация не удалась. "
-                f"Код возврата: {pandoc_process.returncode}, "
-                f"Файл существует: {os.path.exists(docx_file)}, "
-                f"stderr: {stderr_text[:500]}"
-            )
-            logger.warning(error_msg)
+        error_msg = (
+            f"Pandoc конвертация не удалась. "
+            f"Код возврата: {pandoc_process.returncode}, "
+            f"Файл существует: {os.path.exists(docx_file)}, "
+            f"stderr: {stderr_text[:500]}"
+        )
+        logger.warning(error_msg)
             
     except FileNotFoundError:
         logger.warning("Pandoc не найден в PATH")
