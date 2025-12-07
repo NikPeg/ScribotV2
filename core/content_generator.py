@@ -7,6 +7,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from core.latex_template import validate_latex_tags
 from core.page_calculator import (
     calculate_content_pages_for_target,
     calculate_pages_per_chapter,
@@ -253,13 +254,17 @@ async def generate_work_content_stepwise(params: WorkContentParams) -> str:
 
 async def generate_chapter_content(params: ChapterContentParams) -> str:
     """
-    Генерирует содержание одной главы.
+    Генерирует содержание одной главы с валидацией LaTeX тегов.
+    При обнаружении незакрытых тегов перегенерирует главу (до 3 попыток).
     
     Args:
         params: Параметры генерации содержания главы
     
     Returns:
         Содержание главы в формате LaTeX
+    
+    Raises:
+        Exception: Если после 3 попыток не удалось сгенерировать валидную главу
     """
     order_id = params.order_id
     model_name = params.model_name
@@ -267,11 +272,15 @@ async def generate_chapter_content(params: ChapterContentParams) -> str:
     theme = params.theme
     target_pages = params.target_pages
     work_type = params.work_type
+    
+    MAX_ATTEMPTS = 3
+    
     # Определяем тип главы для специальной обработки
     title_lower = chapter_title.lower()
     
-    if 'введение' in title_lower:
-        prompt = f"""
+    for attempt in range(MAX_ATTEMPTS):
+        if 'введение' in title_lower:
+            prompt = f"""
 Напиши введение для {work_type.lower()} на тему "{theme}".
 
 Введение должно содержать:
@@ -285,10 +294,11 @@ async def generate_chapter_content(params: ChapterContentParams) -> str:
 Формат: LaTeX (используй \\section{{Введение}} в начале).
 НЕ используй длинные строки - разбивай на короткие (до 80 символов).
 Используй ссылки на источники через команду \\cite{{source1}}, \\cite{{source2}} и т.д. где уместно, но умеренно - по несколько ссылок на страницу.
+ВАЖНО: Если используешь \\begin{{figure}}, обязательно закрой его \\end{{figure}}.
 """
-    
-    elif 'заключение' in title_lower:
-        prompt = f"""
+        
+        elif 'заключение' in title_lower:
+            prompt = f"""
 Напиши заключение для {work_type.lower()} на тему "{theme}".
 
 Заключение должно содержать:
@@ -301,10 +311,11 @@ async def generate_chapter_content(params: ChapterContentParams) -> str:
 Формат: LaTeX (используй \\section{{Заключение}} в начале).
 НЕ используй длинные строки - разбивай на короткие (до 80 символов).
 Используй ссылки на источники через команду \\cite{{source1}}, \\cite{{source2}} и т.д. где уместно, но умеренно - по несколько ссылок на страницу.
+ВАЖНО: Если используешь \\begin{{figure}}, обязательно закрой его \\end{{figure}}.
 """
-    
-    elif 'список' in title_lower or 'библиография' in title_lower:
-        prompt = f"""
+        
+        elif 'список' in title_lower or 'библиография' in title_lower:
+            prompt = f"""
 Создай список использованных источников для {work_type.lower()} на тему "{theme}".
 
 Включи 15-20 источников:
@@ -327,9 +338,9 @@ async def generate_chapter_content(params: ChapterContentParams) -> str:
 Каждый источник должен иметь уникальный ключ (source1, source2, source3 и т.д.) в команде \\bibitem{{ключ}}.
 НЕ используй длинные строки - разбивай на короткие (до 80 символов).
 """
-    
-    else:
-        prompt = f"""
+        
+        else:
+            prompt = f"""
 Напиши главу "{chapter_title}" для {work_type.lower()} на тему "{theme}".
 
 Глава должна быть содержательной и академической, включать:
@@ -343,20 +354,49 @@ async def generate_chapter_content(params: ChapterContentParams) -> str:
 НЕ используй длинные строки - разбивай на короткие (до 80 символов).
 Можешь включить формулы, таблицы или рисунки где уместно.
 Используй ссылки на источники через команду \\cite{{source1}}, \\cite{{source2}} и т.д. где уместно, но умеренно - по несколько ссылок на страницу.
+ВАЖНО: Если используешь \\begin{{figure}}, обязательно закрой его \\end{{figure}}.
 """
+        
+        chapter_content = await ask_assistant(order_id, prompt, model_name)
+        
+        # Валидируем LaTeX теги
+        is_valid, error_msg = validate_latex_tags(chapter_content)
+        
+        if is_valid:
+            return chapter_content
+        
+        # Если невалиден и это не последняя попытка - перегенерируем
+        if attempt < MAX_ATTEMPTS - 1:
+            print(f"Глава '{chapter_title}': попытка {attempt + 1} невалидна - {error_msg}. Перегенерирую...")
+            continue
+        
+        # Если все попытки исчерпаны - выбрасываем исключение
+        error_details = (
+            f"Не удалось сгенерировать валидную главу '{chapter_title}' после {MAX_ATTEMPTS} попыток. "
+            f"Последняя ошибка: {error_msg}"
+        )
+        raise Exception(error_details)
     
-    return await ask_assistant(order_id, prompt, model_name)
+    # Этот код не должен выполняться, но ruff требует явный return
+    error_details = (
+        f"Не удалось сгенерировать валидную главу '{chapter_title}' после {MAX_ATTEMPTS} попыток."
+    )
+    raise Exception(error_details)
 
 
 async def generate_subsections_content(params: SubsectionsContentParams) -> str:
     """
     Генерирует содержание подразделов для увеличения объема главы.
+    Валидирует LaTeX теги и перегенерирует при необходимости (до 3 попыток).
     
     Args:
         params: Параметры генерации содержания подразделов
     
     Returns:
         Содержание подразделов в формате LaTeX
+    
+    Raises:
+        Exception: Если после 3 попыток не удалось сгенерировать валидный подраздел
     """
     order_id = params.order_id
     model_name = params.model_name
@@ -364,6 +404,8 @@ async def generate_subsections_content(params: SubsectionsContentParams) -> str:
     subsections = params.subsections
     target_pages = params.target_pages
     theme = params.theme
+    MAX_ATTEMPTS = 3
+    
     if not subsections:
         # Если подразделы не указаны, просим GPT их придумать
         subsections_prompt = f"""
@@ -380,7 +422,10 @@ async def generate_subsections_content(params: SubsectionsContentParams) -> str:
     subsections_content = ""
     
     for _i, subsection in enumerate(subsections):
-        subsection_prompt = f"""
+        subsection_content = None
+        
+        for attempt in range(MAX_ATTEMPTS):
+            subsection_prompt = f"""
 Напиши подраздел "{subsection}" для главы "{chapter_title}" в работе на тему "{theme}".
 
 ВАЖНО: Это подраздел, а НЕ отдельная глава!
@@ -393,14 +438,33 @@ async def generate_subsections_content(params: SubsectionsContentParams) -> str:
 - НЕ используй длинные строки - разбивай на короткие (до 80 символов)
 - Пиши академический текст с примерами и анализом
 - Используй ссылки на источники через команду \\cite{{source1}}, \\cite{{source2}} и т.д. где уместно, но умеренно - по несколько ссылок на страницу
+- ВАЖНО: Если используешь \\begin{{figure}}, обязательно закрой его \\end{{figure}}
 
 Начни с команды \\subsection{{{subsection}}} и продолжи содержанием.
 """
-        
-        subsection_content = await ask_assistant(order_id, subsection_prompt, model_name)
-        
-        # Дополнительная проверка и исправление: заменяем \section на \subsection если GPT ошибся
-        subsection_content = fix_section_commands(subsection_content, subsection)
+            
+            subsection_content = await ask_assistant(order_id, subsection_prompt, model_name)
+            
+            # Дополнительная проверка и исправление: заменяем \section на \subsection если GPT ошибся
+            subsection_content = fix_section_commands(subsection_content, subsection)
+            
+            # Валидируем LaTeX теги
+            is_valid, error_msg = validate_latex_tags(subsection_content)
+            
+            if is_valid:
+                break
+            
+            # Если невалиден и это не последняя попытка - перегенерируем
+            if attempt < MAX_ATTEMPTS - 1:
+                print(f"Подраздел '{subsection}': попытка {attempt + 1} невалидна - {error_msg}. Перегенерирую...")
+                continue
+            
+            # Если все попытки исчерпаны - выбрасываем исключение
+            error_details = (
+                f"Не удалось сгенерировать валидный подраздел '{subsection}' для главы '{chapter_title}' "
+                f"после {MAX_ATTEMPTS} попыток. Последняя ошибка: {error_msg}"
+            )
+            raise Exception(error_details)
         
         subsections_content += subsection_content + "\n\n"
     

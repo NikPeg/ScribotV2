@@ -306,6 +306,66 @@ def improve_hyphenation(content: str) -> str:
     return '\n'.join(improved_lines)
 
 
+def validate_latex_tags(content: str) -> tuple[bool, str]:
+    """
+    Валидирует LaTeX контент на наличие незакрытых тегов.
+    Поддерживает стек открывающихся тегов (figure и другие).
+    
+    Args:
+        content: LaTeX контент для валидации
+    
+    Returns:
+        Tuple[bool, str]: (валиден, описание_ошибки)
+        Если валиден - возвращает (True, "")
+        Если невалиден - возвращает (False, описание проблемы)
+    """
+    # Список поддерживаемых тегов для проверки
+    # Формат: (begin_pattern, end_pattern, tag_name)
+    supported_tags = [
+        (r'\\begin\{figure\}', r'\\end\{figure\}', 'figure'),
+        (r'\\begin\{table\}', r'\\end\{table\}', 'table'),
+        (r'\\begin\{equation\}', r'\\end\{equation\}', 'equation'),
+        (r'\\begin\{align\}', r'\\end\{align\}', 'align'),
+        (r'\\begin\{itemize\}', r'\\end\{itemize\}', 'itemize'),
+        (r'\\begin\{enumerate\}', r'\\end\{enumerate\}', 'enumerate'),
+    ]
+    
+    # Стек для отслеживания открытых тегов
+    tag_stack: list[tuple[str, int]] = []  # (tag_name, line_number)
+    
+    lines = content.split('\n')
+    
+    for line_num, line in enumerate(lines, start=1):
+        for begin_pattern, end_pattern, tag_name in supported_tags:
+            # Проверяем открывающий тег
+            begin_matches = list(re.finditer(begin_pattern, line))
+            for _ in begin_matches:
+                tag_stack.append((tag_name, line_num))
+            
+            # Проверяем закрывающий тег
+            end_matches = list(re.finditer(end_pattern, line))
+            for _ in end_matches:
+                if not tag_stack:
+                    return False, f"Найдено закрывающее тег \\end{{{tag_name}}} без соответствующего открывающего на строке {line_num}"
+                
+                # Проверяем, что закрываем правильный тег
+                last_tag, last_line = tag_stack[-1]
+                if last_tag != tag_name:
+                    return False, f"Несоответствие тегов: ожидался \\end{{{last_tag}}} (открыт на строке {last_line}), но найден \\end{{{tag_name}}} на строке {line_num}"
+                
+                tag_stack.pop()
+    
+    # Проверяем, остались ли незакрытые теги
+    if tag_stack:
+        unclosed_tags = []
+        for tag_name, line_num in tag_stack:
+            unclosed_tags.append(f"\\begin{{{tag_name}}} на строке {line_num}")
+        
+        return False, f"Найдены незакрытые теги: {', '.join(unclosed_tags)}"
+    
+    return True, ""
+
+
 def clean_latex_content(content: str) -> str:
     """
     Очищает LaTeX контент от потенциально проблемных элементов.
