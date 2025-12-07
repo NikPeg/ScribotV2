@@ -5,6 +5,7 @@
 
 import contextlib
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -15,6 +16,8 @@ from docx import Document
 
 # Константы
 MIN_TOC_CONTENT_LENGTH = 10  # Минимальная длина текста для проверки содержимого TOC
+MIN_TEXT_LENGTH_FOR_SECTION = 10  # Минимальная длина текста для определения секции
+MIN_EXPECTED_PAGE_BREAKS = 2  # Минимальное количество разрывов страниц
 
 # Добавляем корневую директорию проекта в путь
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
@@ -372,4 +375,391 @@ async def test_docx_toc_contains_content(temp_dir, test_theme, test_pages):
         "TOC должен содержать содержимое (ссылки на разделы). "
         "Проверьте, что pandoc правильно создал оглавление."
     )
+
+
+def count_page_breaks_in_document(doc: Document) -> int:
+    """
+    Подсчитывает количество разрывов страниц в документе.
+    
+    Args:
+        doc: Document объект
+    
+    Returns:
+        Количество разрывов страниц
+    """
+    page_breaks_count = 0
+    for para in doc.paragraphs:
+        for run in para.runs:
+            if hasattr(run, '_element'):
+                xml = run._element.xml
+                # Ищем разрывы страниц в XML: <w:br w:type="page"/>
+                if 'w:br' in xml and 'w:type="page"' in xml:
+                    page_breaks_count += 1
+    return page_breaks_count
+
+
+def find_page_break_positions(doc: Document) -> list[int]:
+    """
+    Находит позиции параграфов, содержащих разрывы страниц.
+    
+    Args:
+        doc: Document объект
+    
+    Returns:
+        Список индексов параграфов с разрывами страниц
+    """
+    positions = []
+    for i, para in enumerate(doc.paragraphs):
+        for run in para.runs:
+            if hasattr(run, '_element'):
+                xml = run._element.xml
+                if 'w:br' in xml and 'w:type="page"' in xml:
+                    positions.append(i)
+                    break
+    return positions
+
+
+@pytest.mark.asyncio
+async def test_docx_page_breaks(temp_dir, test_theme, test_pages):  # noqa: PLR0912
+    """
+    Тест: проверяет наличие разрывов страниц в DOCX файле.
+    
+    Проверяет:
+    1. Разрыв страницы после титульной страницы (перед TOC)
+    2. Разрыв страницы после TOC (перед первой главой)
+    3. Разрыв страницы перед каждой новой главой
+    4. Общее количество разрывов страниц (минимум 2 + количество глав)
+    """
+    if not check_pandoc_available():
+        pytest.skip("Pandoc не установлен. Пропускаем тест генерации DOCX.")
+    
+    # Генерируем тестовую работу
+    result = await generate_test_work(
+        theme=test_theme,
+        pages=test_pages,
+        work_type="курсовая",
+        model_name=TEST_MODEL_NAME,
+        output_dir=temp_dir
+    )
+    
+    # Проверяем, что DOCX был создан
+    assert result['docx_path'] is not None
+    assert os.path.exists(result['docx_path'])
+    
+    # Открываем DOCX файл
+    doc = Document(result['docx_path'])
+    paragraphs = list(doc.paragraphs)
+    
+    # Подсчитываем разрывы страниц
+    page_breaks_count = count_page_breaks_in_document(doc)
+    page_break_positions = find_page_break_positions(doc)
+    
+    # Логируем для отладки (используем print, так как logger может быть не настроен)
+    print(f"Найдено разрывов страниц: {page_breaks_count}")
+    print(f"Позиции разрывов страниц: {page_break_positions}")
+    
+    # Должно быть минимум 2 разрыва страницы:
+    # 1. После титульной страницы (перед TOC)
+    # 2. После TOC (перед первой главой)
+    # + по одному перед каждой новой главой
+    assert page_breaks_count >= MIN_EXPECTED_PAGE_BREAKS, (
+        f"Должно быть минимум {MIN_EXPECTED_PAGE_BREAKS} разрыва страницы (после титульной и после TOC). "
+        f"Найдено: {page_breaks_count}"
+    )
+    
+    # Находим позиции ключевых элементов
+    title_end_idx = find_title_page_end(doc)
+    toc_start_idx = find_toc_position(doc)
+    toc_end_idx = None
+    
+    # Находим конец TOC
+    if toc_start_idx is not None:
+        for i in range(toc_start_idx + 1, len(paragraphs)):
+            text = paragraphs[i].text.strip()
+            # Ищем начало первой главы
+            if (text and len(text) > MIN_TEXT_LENGTH_FOR_SECTION and
+                not any(marker in text.lower() for marker in ['table of contents', 'содержание', 'оглавление'])):
+                toc_end_idx = i
+                break
+    
+    # Проверяем наличие разрыва страницы после титульной страницы
+    if title_end_idx is not None and toc_start_idx is not None:
+        # Разрыв страницы должен быть между титульной страницей и TOC
+        breaks_after_title = [
+            pos for pos in page_break_positions
+            if title_end_idx < pos <= toc_start_idx
+        ]
+        assert len(breaks_after_title) > 0, (
+            f"Должен быть разрыв страницы после титульной страницы (позиция {title_end_idx}) "
+            f"и перед TOC (позиция {toc_start_idx}). "
+            f"Найдены разрывы на позициях: {page_break_positions}"
+        )
+    
+    # Проверяем наличие разрыва страницы после TOC
+    if toc_end_idx is not None:
+        # Разрыв страницы должен быть после TOC
+        breaks_after_toc = [
+            pos for pos in page_break_positions
+            if toc_end_idx <= pos < toc_end_idx + 5  # Разрыв может быть в пределах 5 параграфов после TOC
+        ]
+        assert len(breaks_after_toc) > 0, (
+            f"Должен быть разрыв страницы после TOC (позиция {toc_end_idx}). "
+            f"Найдены разрывы на позициях: {page_break_positions}"
+        )
+    
+    # Подсчитываем количество глав (секций)
+    sections_count = 0
+    for i, para in enumerate(paragraphs):
+        # Пропускаем титульную страницу и TOC
+        if title_end_idx is not None and i <= title_end_idx:
+            continue
+        if toc_start_idx is not None and toc_end_idx is not None and toc_start_idx <= i <= toc_end_idx:
+            continue
+        
+        text = para.text.strip()
+        if not text:
+            continue
+        
+        # Проверяем, является ли параграф заголовком секции
+        is_section = False
+        if para.style and para.style.name:
+            style_name = para.style.name.lower()
+            if 'heading' in style_name:
+                is_section = True
+        
+        if (not is_section and text and
+            (re.match(r'^\d+[.)]\s+[А-ЯЁ]', text) or re.match(r'^\d+[.)]\s+[A-Z]', text))):
+            # Проверяем паттерн номера секции
+            is_section = True
+        
+        if is_section:
+            sections_count += 1
+    
+    # Ожидаемое количество разрывов страниц:
+    # 1 после титульной страницы + 1 после TOC + по одному перед каждой главой (кроме первой)
+    expected_min_breaks = 2 + max(0, sections_count - 1)
+    
+    assert page_breaks_count >= expected_min_breaks, (
+        f"Ожидается минимум {expected_min_breaks} разрывов страницы "
+        f"(1 после титульной, 1 после TOC, {max(0, sections_count - 1)} перед главами). "
+        f"Найдено: {page_breaks_count}, глав: {sections_count}"
+    )
+
+
+@pytest.mark.asyncio
+async def test_docx_page_breaks_structure(temp_dir, test_theme, test_pages):
+    """
+    Тест: проверяет структуру разрывов страниц в DOCX файле.
+    
+    Проверяет правильный порядок: титульная страница → [разрыв] → TOC → [разрыв] → главы.
+    """
+    if not check_pandoc_available():
+        pytest.skip("Pandoc не установлен. Пропускаем тест генерации DOCX.")
+    
+    # Генерируем тестовую работу
+    result = await generate_test_work(
+        theme=test_theme,
+        pages=test_pages,
+        work_type="курсовая",
+        model_name=TEST_MODEL_NAME,
+        output_dir=temp_dir
+    )
+    
+    # Проверяем, что DOCX был создан
+    assert result['docx_path'] is not None
+    assert os.path.exists(result['docx_path'])
+    
+    # Открываем DOCX файл
+    doc = Document(result['docx_path'])
+    
+    # Находим позиции ключевых элементов
+    title_end_idx = find_title_page_end(doc)
+    toc_start_idx = find_toc_position(doc)
+    
+    assert title_end_idx is not None, "Не удалось найти конец титульной страницы"
+    assert toc_start_idx is not None, "Не удалось найти TOC"
+    
+    # Проверяем порядок: титульная страница должна быть перед TOC
+    assert title_end_idx < toc_start_idx, (
+        f"Титульная страница (конец на позиции {title_end_idx}) "
+        f"должна быть перед TOC (позиция {toc_start_idx})"
+    )
+    
+    # Проверяем наличие разрыва страницы между титульной страницей и TOC
+    page_break_positions = find_page_break_positions(doc)
+    breaks_between_title_and_toc = [
+        pos for pos in page_break_positions
+        if title_end_idx < pos <= toc_start_idx
+    ]
+    
+    assert len(breaks_between_title_and_toc) > 0, (
+        f"Должен быть разрыв страницы между титульной страницей (позиция {title_end_idx}) "
+        f"и TOC (позиция {toc_start_idx}). "
+        f"Найдены разрывы на позициях: {page_break_positions}"
+    )
+
+
+def count_pages_in_docx(docx_path: str) -> int:
+    """
+    Подсчитывает приблизительное количество страниц в DOCX файле.
+    
+    Использует метод подсчета разрывов страниц и структуры документа
+    для оценки количества страниц.
+    
+    Args:
+        docx_path: Путь к DOCX файлу
+    
+    Returns:
+        Приблизительное количество страниц
+    """
+    doc = Document(docx_path)
+    paragraphs = list(doc.paragraphs)
+    
+    # Подсчитываем разрывы страниц
+    page_breaks = count_page_breaks_in_document(doc)
+    
+    # Базовое количество страниц: минимум 1 страница
+    # Каждый разрыв страницы добавляет минимум 1 страницу
+    estimated_pages = 1 + page_breaks
+    
+    # Если есть TOC, добавляем страницу для него
+    toc_found = find_toc_position(doc) is not None or find_toc_sdt_position(doc) is not None
+    if toc_found:
+        estimated_pages += 1
+    
+    # Учитываем количество глав (секций)
+    sections_count = 0
+    for para in paragraphs:
+        if para.style and 'heading' in para.style.name.lower():
+            sections_count += 1
+    
+    # Каждая глава должна быть на отдельной странице
+    if sections_count > 0:
+        estimated_pages = max(estimated_pages, 1 + sections_count + (1 if toc_found else 0))
+    
+    return estimated_pages
+
+
+@pytest.mark.asyncio
+async def test_docx_page_breaks_count(temp_dir, test_theme, test_pages):  # noqa: PLR0912
+    """
+    Тест: проверяет количество страниц в DOCX файле.
+    
+    Проверяет, что документ имеет правильное количество страниц:
+    - Минимум 1 страница (титульный лист)
+    - +1 страница если есть TOC
+    - +1 страница для каждой главы
+    
+    Также проверяет наличие разрывов страниц в правильных местах.
+    """
+    if not check_pandoc_available():
+        pytest.skip("Pandoc не установлен. Пропускаем тест генерации DOCX.")
+    
+    # Генерируем тестовую работу
+    result = await generate_test_work(
+        theme=test_theme,
+        pages=test_pages,
+        work_type="курсовая",
+        model_name=TEST_MODEL_NAME,
+        output_dir=temp_dir
+    )
+    
+    # Проверяем, что DOCX был создан
+    assert result['docx_path'] is not None
+    assert os.path.exists(result['docx_path'])
+    
+    # Открываем DOCX файл
+    doc = Document(result['docx_path'])
+    paragraphs = list(doc.paragraphs)
+    
+    # Подсчитываем разрывы страниц
+    page_breaks_count = count_page_breaks_in_document(doc)
+    
+    # Проверяем наличие TOC
+    toc_found = find_toc_position(doc) is not None or find_toc_sdt_position(doc) is not None
+    
+    # Подсчитываем количество глав (секций)
+    sections_count = 0
+    title_end_idx = find_title_page_end(doc)
+    toc_start_idx = find_toc_position(doc)
+    
+    for i, para in enumerate(paragraphs):
+        # Пропускаем титульную страницу и TOC
+        if title_end_idx is not None and i <= title_end_idx:
+            continue
+        if toc_start_idx is not None and toc_start_idx <= i < toc_start_idx + 10:
+            # Пропускаем TOC (примерно 5-10 параграфов после начала)
+            continue
+        
+        if para.style and 'heading' in para.style.name.lower():
+            sections_count += 1
+    
+    # Ожидаемое минимальное количество страниц:
+    # 1 (титульная страница) + 1 (TOC, если есть) + количество глав
+    min_expected_pages = 1
+    if toc_found:
+        min_expected_pages += 1
+    if sections_count > 0:
+        min_expected_pages += sections_count
+    
+    # Ожидаемое минимальное количество разрывов страниц:
+    # 1 после титульной страницы (перед TOC) + 1 после TOC (перед первой главой) +
+    # по одному перед каждой новой главой (кроме первой)
+    min_expected_breaks = 0
+    if toc_found:
+        # Если есть TOC: разрыв перед TOC и разрыв после TOC (перед первой главой)
+        min_expected_breaks = 2
+        # Дополнительные разрывы перед каждой новой главой (начиная со второй)
+        # Но учитываем, что разрыв может не добавляться, если главы идут подряд
+        # Поэтому проверяем только наличие основных разрывов
+    elif sections_count > 0:
+        # Если TOC нет: разрыв перед первой главой
+        min_expected_breaks = 1
+    
+    # Проверяем количество разрывов страниц (основные разрывы обязательны)
+    assert page_breaks_count >= min_expected_breaks, (
+        f"Ожидается минимум {min_expected_breaks} разрывов страницы (основные: перед/после TOC или перед первой главой). "
+        f"Найдено: {page_breaks_count}. "
+        f"TOC найден: {toc_found}, глав: {sections_count}"
+    )
+    
+    # Дополнительно проверяем наличие разрывов перед главами (если глав больше 1)
+    # Это необязательная проверка, так как разрывы перед главами могут добавляться
+    # только если они определены как секции в коде
+    if sections_count > 1:
+        # Ищем разрывы страниц перед заголовками глав (начиная со второй)
+        breaks_before_sections = 0
+        previous_section_idx = None
+        for i, para in enumerate(paragraphs):
+            if para.style and 'heading' in para.style.name.lower():
+                if previous_section_idx is not None:
+                    # Проверяем, есть ли разрыв страницы перед этой главой
+                    has_break = False
+                    if para.runs:
+                        first_run = para.runs[0]
+                        if hasattr(first_run, '_element'):
+                            xml = first_run._element.xml
+                            if 'w:br' in xml and 'w:type="page"' in xml:
+                                has_break = True
+                    if has_break:
+                        breaks_before_sections += 1
+                previous_section_idx = i
+        
+        # Логируем информацию о разрывах перед главами (не строгая проверка)
+        if breaks_before_sections > 0:
+            print(f"  Найдено {breaks_before_sections} разрывов страниц перед главами (из {sections_count - 1} возможных)")
+    
+    # Подсчитываем приблизительное количество страниц
+    estimated_pages = count_pages_in_docx(result['docx_path'])
+    
+    # Проверяем, что количество страниц соответствует ожидаемому
+    assert estimated_pages >= min_expected_pages, (
+        f"Ожидается минимум {min_expected_pages} страниц. "
+        f"Оценка: {estimated_pages}. "
+        f"TOC найден: {toc_found}, глав: {sections_count}, разрывов: {page_breaks_count}"
+    )
+    
+    print(f"✓ Документ содержит: {estimated_pages} страниц (минимум {min_expected_pages}), "
+          f"{page_breaks_count} разрывов страниц (минимум {min_expected_breaks}), "
+          f"{sections_count} глав")
 

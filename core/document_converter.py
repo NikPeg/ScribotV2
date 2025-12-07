@@ -10,6 +10,8 @@ import re
 
 import qrcode
 from docx import Document
+from docx.enum.text import WD_BREAK
+from docx.oxml import parse_xml
 from pypdf import PdfReader, PdfWriter
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas
@@ -17,6 +19,13 @@ from reportlab.pdfgen import canvas
 # Константы
 MIN_PDF_SIZE_BYTES = 1000  # Минимальный размер PDF файла (1KB)
 MAX_TOC_TITLE_LENGTH = 30  # Максимальная длина заголовка TOC для поиска
+MIN_TEXT_LENGTH_FOR_SECTION = 10  # Минимальная длина текста для определения секции
+MIN_TEXT_LENGTH_FOR_CHAPTER = 20  # Минимальная длина текста для определения главы
+MIN_TEXT_LENGTH_FOR_PARAGRAPH = 5  # Минимальная длина текста для определения параграфа
+MAX_TOC_LINES = 5  # Максимальное количество строк в TOC
+MAX_HEADING_LENGTH = 100  # Максимальная длина заголовка
+MIN_CONTENT_LENGTH = 50  # Минимальная длина контента после заголовка
+MAX_SEARCH_RANGE = 30  # Максимальный диапазон поиска после элемента
 
 # Логгер для модуля
 logger = logging.getLogger(__name__)
@@ -373,6 +382,13 @@ async def _convert_tex_to_docx_direct(tex_content: str, output_dir: str, filenam
             except Exception as e:
                 logger.warning(f"Не удалось переместить TOC: {e}. Оставляем TOC в начале документа.")
             
+            # Добавляем разрывы страниц в нужных местах
+            try:
+                _add_page_breaks_to_docx(docx_file)
+                logger.info("Разрывы страниц успешно добавлены")
+            except Exception as e:
+                logger.warning(f"Не удалось добавить разрывы страниц: {e}")
+            
             file_size = os.path.getsize(docx_file)
             logger.info(f"DOCX успешно создан через pandoc: {docx_file} (размер: {file_size} байт)")
             # Удаляем временный файл
@@ -668,6 +684,369 @@ def _prepare_tex_for_pandoc(tex_content: str) -> str:
     
     # Убираем лишние пустые строки
     return re.sub(r'\n\s*\n\s*\n+', '\n\n', result)
+
+
+def _add_page_breaks_to_docx(docx_path: str) -> None:  # noqa: PLR0912, PLR0915
+    """
+    Добавляет разрывы страниц в DOCX файле в нужных местах:
+    1. После титульной страницы (перед TOC)
+    2. После TOC (перед первой главой)
+    3. Перед каждой новой главой (section)
+    
+    Args:
+        docx_path: Путь к DOCX файлу
+    """
+    try:
+        doc = Document(docx_path)
+        paragraphs = list(doc.paragraphs)
+        
+        logger.info(f"Добавляю разрывы страниц в документ с {len(paragraphs)} параграфами")
+        
+        # Выводим первые несколько параграфов для отладки
+        for i, para in enumerate(paragraphs[:10]):
+            logger.debug(f"Параграф {i}: '{para.text[:60]}...' (стиль: {para.style.name if para.style else 'None'})")
+        
+        # Находим позиции ключевых элементов
+        title_end_idx = None
+        toc_start_idx = None
+        toc_end_idx = None
+        
+        # Находим конец титульной страницы
+        # Титульная страница заканчивается на параграфе с "Проверил:" или "Петров П.П."
+        for i, para in enumerate(paragraphs):
+            text = para.text.strip()
+            if 'проверил:' in text.lower() or ('петров' in text.lower() and 'п.п' in text.lower()):
+                title_end_idx = i
+                logger.info(f"Найден конец титульной страницы на позиции {i}: '{text[:60]}'")
+                # Ищем последний параграф титульной страницы (может быть пустая строка после)
+                for j in range(i + 1, min(i + 3, len(paragraphs))):
+                    next_text = paragraphs[j].text.strip()
+                    # Если следующий параграф не пустой и не является началом TOC или главы
+                    if next_text and not any(marker in next_text.lower() for marker in ['table of contents', 'содержание', 'оглавление']):
+                        # Проверяем, не является ли это заголовком главы
+                        next_para = paragraphs[j]
+                        if next_para.style and 'heading' in next_para.style.name.lower():
+                            break
+                        title_end_idx = j
+                    else:
+                        break
+                break
+        
+        # Находим TOC (может быть в параграфах или как SDT элемент)
+        body = doc.element.body
+        
+        # Сначала проверяем, есть ли SDT элемент (TOC)
+        toc_sdt_idx = None
+        for i, elem in enumerate(body):
+            if 'sdt' in elem.tag.lower():
+                toc_sdt_idx = i
+                logger.info(f"Найден TOC как SDT элемент на позиции {i} в body")
+                break
+        
+        # Ищем TOC в параграфах
+        # TOC обычно содержит текст "Table of Contents" или "Содержание"
+        for i, para in enumerate(paragraphs):
+            text = para.text.strip().lower()
+            # Проверяем, что это действительно TOC, а не заголовок главы
+            # TOC обычно не является заголовком (Heading стиль)
+            is_heading = para.style and 'heading' in para.style.name.lower()
+            if (('table of contents' in text or 'содержание' in text or 'оглавление' in text) and not is_heading):
+                toc_start_idx = i
+                logger.info(f"Найден TOC в параграфах на позиции {i}")
+                # Ищем конец TOC - следующую секцию или начало контента
+                for j in range(i + 1, len(paragraphs)):
+                    para_text = paragraphs[j].text.strip()
+                    # Если нашли секцию (обычно начинается с номера или заголовка)
+                    if (para_text and (
+                        para_text.startswith('\\section') or
+                        (len(para_text) > 0 and para_text[0].isdigit()) or
+                        ('section' in para_text.lower() and len(para_text) < MAX_HEADING_LENGTH)
+                    ) and j - i > MAX_TOC_LINES):  # TOC обычно занимает несколько строк
+                        toc_end_idx = j
+                        break
+                # Если не нашли конец, используем следующую секцию после TOC
+                if toc_end_idx is None:
+                    for j in range(i + 1, min(i + MAX_SEARCH_RANGE, len(paragraphs))):
+                        para_text = paragraphs[j].text.strip()
+                        # Ищем начало первой главы (обычно это section или заголовок)
+                        if (para_text and len(para_text) > MIN_TEXT_LENGTH_FOR_SECTION and
+                            not any(marker in para_text.lower() for marker in ['table of contents', 'содержание', 'оглавление']) and
+                            (len(para_text) > MIN_TEXT_LENGTH_FOR_CHAPTER or para_text[0].isdigit())):
+                            toc_end_idx = j
+                            break
+                break
+        
+        # Если TOC найден как SDT элемент, определяем его позицию в параграфах
+        if (toc_sdt_idx is not None and toc_start_idx is None and title_end_idx is not None):
+            # Ищем позицию SDT элемента в параграфах
+            # SDT элемент обычно находится после титульной страницы
+            # TOC должен быть сразу после титульной страницы
+            toc_start_idx = title_end_idx + 1
+            # Ищем конец TOC - следующую секцию
+            for j in range(toc_start_idx + 1, min(toc_start_idx + MAX_SEARCH_RANGE, len(paragraphs))):
+                para_text = paragraphs[j].text.strip()
+                para_j = paragraphs[j]
+                if (para_text and len(para_text) > MIN_TEXT_LENGTH_FOR_SECTION and
+                    not any(marker in para_text.lower() for marker in ['table of contents', 'содержание', 'оглавление']) and
+                    (len(para_text) > MIN_TEXT_LENGTH_FOR_CHAPTER or para_text[0].isdigit() or
+                     (para_j.style and 'heading' in para_j.style.name.lower()))):
+                    toc_end_idx = j
+                    break
+        
+        logger.info(f"Найдены позиции: title_end_idx={title_end_idx}, toc_start_idx={toc_start_idx}, toc_end_idx={toc_end_idx}, toc_sdt_idx={toc_sdt_idx}")
+        
+        # Добавляем разрыв страницы ПЕРЕД TOC (если TOC есть)
+        if title_end_idx is not None and (toc_start_idx is not None or toc_sdt_idx is not None):
+            # TOC найден, добавляем разрыв страницы ПЕРЕД TOC
+            if toc_sdt_idx is not None:
+                # TOC - SDT элемент, работаем с body напрямую
+                # Находим SDT элемент в body
+                sdt_elem = body[toc_sdt_idx]
+                # Создаем параграф с разрывом страницы перед SDT элементом
+                break_para_xml = '<w:p xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:r><w:br w:type="page"/></w:r></w:p>'
+                break_para_elem = parse_xml(break_para_xml)
+                # Вставляем перед SDT элементом
+                parent = sdt_elem.getparent()
+                if parent is not None:
+                    sdt_index = parent.index(sdt_elem)
+                    parent.insert(sdt_index, break_para_elem)
+                    logger.info(f"Добавлен разрыв страницы ПЕРЕД TOC (SDT элемент на позиции {toc_sdt_idx} в body)")
+                    # Обновляем список параграфов
+                    paragraphs = list(doc.paragraphs)
+            elif toc_start_idx is not None:
+                # TOC найден в параграфах
+                target_para = paragraphs[toc_start_idx]
+                # Проверяем, нет ли уже разрыва страницы перед TOC
+                has_page_break = False
+                if target_para.runs:
+                    first_run = target_para.runs[0]
+                    if hasattr(first_run, '_element'):
+                        xml = first_run._element.xml
+                        if 'w:br' in xml and 'w:type="page"' in xml:
+                            has_page_break = True
+                
+                if not has_page_break:
+                    # Добавляем разрыв страницы в начало TOC параграфа
+                    if target_para.runs:
+                        first_run = target_para.runs[0]
+                        run_element = first_run._element
+                        break_xml = '<w:br xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" w:type="page"/>'
+                        break_element = parse_xml(break_xml)
+                        run_element.insert(0, break_element)
+                    else:
+                        target_para.add_run().add_break(WD_BREAK.PAGE)
+                    logger.info(f"Добавлен разрыв страницы ПЕРЕД TOC (позиция {toc_start_idx})")
+                    paragraphs = list(doc.paragraphs)
+        
+        # Добавляем разрыв страницы после титульной страницы (если TOC нет, то перед первой главой)
+        # Ищем первый непустой параграф после титульной страницы (TOC или заголовок главы)
+        if title_end_idx is not None and toc_start_idx is None and toc_sdt_idx is None:
+            # Ищем первый непустой параграф после титульной страницы (TOC или заголовок главы)
+            target_idx = None
+            for i in range(title_end_idx + 1, min(title_end_idx + 15, len(paragraphs))):
+                para = paragraphs[i]
+                text = para.text.strip()
+                # Пропускаем пустые параграфы
+                if not text or len(text) == 0:
+                    continue
+                
+                text_lower = text.lower()
+                is_toc = ('table of contents' in text_lower or 'содержание' in text_lower or 'оглавление' in text_lower)
+                is_heading = para.style and 'heading' in para.style.name.lower()
+                
+                # Это либо TOC, либо заголовок главы - это наш целевой элемент
+                if is_toc or is_heading:
+                    target_idx = i
+                    logger.info(f"Найден целевой элемент на позиции {i}: TOC={is_toc}, Heading={is_heading}, текст='{text[:50]}'")
+                    break
+            
+            # Если не нашли явный TOC или заголовок, берем первый непустой параграф с достаточным количеством текста
+            if target_idx is None:
+                for i in range(title_end_idx + 1, min(title_end_idx + 15, len(paragraphs))):
+                    para = paragraphs[i]
+                    text = para.text.strip()
+                    if text and len(text) > MIN_TEXT_LENGTH_FOR_PARAGRAPH:
+                        target_idx = i
+                        logger.info(f"Найден первый непустой параграф на позиции {i}: '{text[:50]}'")
+                        break
+            
+            if target_idx is not None:
+                target_para = paragraphs[target_idx]
+                # Проверяем, нет ли уже разрыва страницы в начале целевого параграфа
+                has_page_break = False
+                if target_para.runs:
+                    first_run = target_para.runs[0]
+                    if hasattr(first_run, '_element'):
+                        xml = first_run._element.xml
+                        if 'w:br' in xml and 'w:type="page"' in xml:
+                            has_page_break = True
+                
+                # Также проверяем предыдущий параграф
+                if not has_page_break and target_idx > 0:
+                    prev_para = paragraphs[target_idx - 1]
+                    # Если предыдущий параграф пустой, проверяем его на разрыв страницы
+                    if not prev_para.text.strip():
+                        for run in prev_para.runs:
+                            if hasattr(run, '_element'):
+                                xml = run._element.xml
+                                if 'w:br' in xml and 'w:type="page"' in xml:
+                                    has_page_break = True
+                                    break
+                
+                if not has_page_break:
+                    # Добавляем разрыв страницы в начало целевого параграфа
+                    # Используем XML напрямую для вставки разрыва страницы в начало первого run
+                    if target_para.runs:
+                        first_run = target_para.runs[0]
+                        # Получаем XML первого run
+                        run_element = first_run._element
+                        # Создаем элемент разрыва страницы
+                        break_xml = '<w:br xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" w:type="page"/>'
+                        break_element = parse_xml(break_xml)
+                        # Вставляем разрыв страницы в начало run (перед текстом)
+                        run_element.insert(0, break_element)
+                    else:
+                        # Параграф без runs, добавляем run с разрывом
+                        run = target_para.add_run()
+                        run.add_break(WD_BREAK.PAGE)
+                    target_text = target_para.text[:50].replace('\n', ' ')
+                    logger.info(f"Добавлен разрыв страницы после титульной страницы (в начало параграфа {target_idx}: '{target_text}')")
+                    # Обновляем список параграфов
+                    paragraphs = list(doc.paragraphs)
+        
+        # Добавляем разрыв страницы после TOC (перед первой главой)
+        # Если TOC найден, добавляем разрыв после него
+        # Если TOC не найден, но есть титульная страница, добавляем разрыв перед первой главой
+        if toc_end_idx is not None:
+            # TOC найден, добавляем разрыв после него
+            insert_idx = toc_end_idx
+            # Обновляем список параграфов, так как могли добавить новые
+            paragraphs = list(doc.paragraphs)
+            if insert_idx < len(paragraphs):
+                para = paragraphs[insert_idx]
+                # Проверяем, нет ли уже разрыва страницы
+                has_page_break = False
+                if para.runs:
+                    first_run = para.runs[0]
+                    if hasattr(first_run, '_element'):
+                        xml = first_run._element.xml
+                        if 'w:br' in xml and 'w:type="page"' in xml:
+                            has_page_break = True
+                
+                if not has_page_break:
+                    # Создаем новый параграф с разрывом страницы перед первой главой
+                    new_para = para.insert_paragraph_before()
+                    new_para.add_run().add_break(WD_BREAK.PAGE)
+                    logger.info(f"Добавлен разрыв страницы после TOC (перед позицией {insert_idx})")
+        elif title_end_idx is not None and toc_start_idx is None and toc_sdt_idx is None:
+            # TOC не найден, но есть титульная страница - ищем первую главу
+            for j in range(title_end_idx + 1, min(title_end_idx + MAX_SEARCH_RANGE, len(paragraphs))):
+                para_text = paragraphs[j].text.strip()
+                para_j = paragraphs[j]
+                if para_text and (
+                    (para_j.style and 'heading' in para_j.style.name.lower()) or
+                    para_text[0].isdigit() or
+                    len(para_text) > MIN_TEXT_LENGTH_FOR_CHAPTER
+                ):
+                    # Нашли первую главу
+                    # Обновляем список параграфов
+                    paragraphs = list(doc.paragraphs)
+                    if j < len(paragraphs):
+                        para = paragraphs[j]
+                        # Проверяем, нет ли уже разрыва страницы
+                        has_page_break = False
+                        if para.runs:
+                            first_run = para.runs[0]
+                            if hasattr(first_run, '_element'):
+                                xml = first_run._element.xml
+                                if 'w:br' in xml and 'w:type="page"' in xml:
+                                    has_page_break = True
+                        
+                        if not has_page_break:
+                            # Создаем новый параграф с разрывом страницы перед первой главой
+                            new_para = para.insert_paragraph_before()
+                            new_para.add_run().add_break(WD_BREAK.PAGE)
+                            logger.info(f"Добавлен разрыв страницы перед первой главой (позиция {j})")
+                    break
+        
+        # Находим все секции и добавляем разрыв страницы перед каждой новой секцией
+        # Pandoc конвертирует \section в заголовки с определенными стилями
+        # Ищем параграфы, которые являются заголовками (Heading 1, Heading 2, и т.д.)
+        previous_section_idx = None
+        
+        for i, para in enumerate(paragraphs):
+            # Пропускаем титульную страницу и TOC
+            if title_end_idx is not None and i <= title_end_idx:
+                continue
+            if toc_start_idx is not None and toc_end_idx is not None and toc_start_idx <= i <= toc_end_idx:
+                continue
+            
+            text = para.text.strip()
+            if not text:
+                continue
+            
+            # Проверяем, является ли параграф заголовком
+            is_section = False
+            
+            # 1. Проверяем стиль параграфа (pandoc создает заголовки с определенными стилями)
+            if para.style and para.style.name:
+                style_name = para.style.name.lower()
+                if 'heading' in style_name or 'заголовок' in style_name:
+                    is_section = True
+            
+            # 2. Проверяем, начинается ли текст с номера секции (1., 2., и т.д.)
+            if not is_section and text and (re.match(r'^\d+[.)]\s+[А-ЯЁ]', text) or re.match(r'^\d+[.)]\s+[A-Z]', text)):
+                # Паттерн: число, точка/скобка, пробел, текст
+                is_section = True
+            
+            # 3. Проверяем, является ли это коротким текстом, который может быть заголовком
+            if (not is_section and text and len(text) < MAX_HEADING_LENGTH and text[0].isupper() and
+                i + 1 < len(paragraphs)):
+                next_text = paragraphs[i + 1].text.strip()
+                # Если следующий параграф длинный (это контент главы), то текущий - заголовок
+                if len(next_text) > MIN_CONTENT_LENGTH:
+                    is_section = True
+            
+            if is_section:
+                # Добавляем разрыв страницы перед секцией (кроме первой)
+                if previous_section_idx is not None:
+                    # Обновляем список параграфов, так как могли добавить новые
+                    paragraphs = list(doc.paragraphs)
+                    if i < len(paragraphs):
+                        para = paragraphs[i]
+                        # Проверяем, нет ли уже разрыва страницы
+                        has_page_break = False
+                        if para.runs:
+                            first_run = para.runs[0]
+                            if hasattr(first_run, '_element'):
+                                xml = first_run._element.xml
+                                if 'w:br' in xml and 'w:type="page"' in xml:
+                                    has_page_break = True
+                        
+                        if not has_page_break:
+                            # Добавляем разрыв страницы в начало параграфа секции (используем XML)
+                            if para.runs:
+                                first_run = para.runs[0]
+                                # Получаем XML первого run
+                                run_element = first_run._element
+                                # Создаем элемент разрыва страницы
+                                break_xml = '<w:br xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" w:type="page"/>'
+                                break_element = parse_xml(break_xml)
+                                # Вставляем разрыв страницы в начало run (перед текстом)
+                                run_element.insert(0, break_element)
+                            else:
+                                # Параграф без runs, добавляем run с разрывом
+                                para.add_run().add_break(WD_BREAK.PAGE)
+                            logger.info(f"Добавлен разрыв страницы перед секцией на позиции {i}: '{text[:50]}'")
+                previous_section_idx = i
+        
+        # Сохраняем документ
+        doc.save(docx_path)
+        logger.info("Разрывы страниц успешно добавлены в документ")
+        
+    except Exception as e:
+        logger.error(f"Ошибка при добавлении разрывов страниц: {e}", exc_info=True)
+        raise
 
 
 def _extract_text_from_latex(tex_content: str) -> str:
