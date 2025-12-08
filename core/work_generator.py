@@ -16,6 +16,7 @@ from core.content_generator import (
     generate_simple_work_content,
     generate_work_content_stepwise,
     generate_work_plan,
+    parse_theme_with_sections,
 )
 from core.document_converter import (
     compile_latex_to_pdf,
@@ -126,11 +127,21 @@ async def _generate_large_work(params: LargeWorkGenerationParams) -> str:
     """Генерирует большую работу с планом и оглавлением."""
     await _update_progress(ProgressUpdateParams(params.bot, params.chat_id, params.message_id_to_edit, 1, "Составляю план работы...", params.total_stages))
     
+    # Парсим тему: если она многострочная, извлекаем тему и разделы с подразделами
+    theme, provided_sections = parse_theme_with_sections(params.theme)
+    
     # Генерируем план с валидацией (до 3 попыток)
     MAX_PLAN_ATTEMPTS = 3
     plans = []
     for attempt in range(MAX_PLAN_ATTEMPTS):
-        plan = await generate_work_plan(params.order_id, params.model_name, params.theme, params.pages, params.work_type)
+        plan = await generate_work_plan(
+            params.order_id,
+            params.model_name,
+            theme,
+            params.pages,
+            params.work_type,
+            provided_sections=provided_sections if provided_sections else None
+        )
         is_valid, items_count = validate_work_plan(plan, params.pages)
         plans.append((plan, items_count))
         
@@ -160,7 +171,7 @@ async def _generate_large_work(params: LargeWorkGenerationParams) -> str:
     content_params = WorkContentParams(
         order_id=params.order_id,
         model_name=params.model_name,
-        theme=params.theme,
+        theme=theme,  # Используем очищенную тему (без разделов)
         pages=params.pages,
         work_type=params.work_type,
         plan_text=plan,

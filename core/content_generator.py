@@ -136,9 +136,111 @@ async def _send_validation_warning_to_admin(
         print(f"Failed to send validation warning to admin: {e}")
 
 
-async def generate_work_plan(order_id: int, model_name: str, theme: str, pages: int, work_type: str) -> str:
+def parse_theme_with_sections(theme_text: str) -> tuple[str, list[dict]]:  # noqa: PLR0912
+    """
+    Парсит многострочную тему работы.
+    Первая строка считается темой, остальные - списком разделов с подразделами.
+    
+    Умно различает разделы от подразделов:
+    - Разделы: строки, начинающиеся с "Глава", "Раздел", или нумерацией вида "1.", "2."
+    - Подразделы: строки с нумерацией вида "1.1", "1.2", "2.1" (привязываются к предыдущему разделу)
+    
+    Args:
+        theme_text: Многострочный текст темы работы
+    
+    Returns:
+        Кортеж (тема, список словарей с разделами и подразделами)
+        Каждый словарь: {'title': 'Название раздела', 'subsections': ['подраздел1', 'подраздел2']}
+    """
+    lines = [line.strip() for line in theme_text.split('\n') if line.strip()]
+    
+    if not lines:
+        return theme_text, []
+    
+    # Первая строка - тема
+    theme = lines[0]
+    
+    if len(lines) == 1:
+        return theme, []
+    
+    # Остальные строки - потенциальные разделы и подразделы
+    sections = []
+    current_section = None
+    
+    for line in lines[1:]:
+        # Проверяем, является ли это подразделом
+        # Подразделы имеют нумерацию вида "1.1", "1.2", "2.1" и т.д.
+        subsection_pattern = r'^\d+\.\d+'
+        if re.match(subsection_pattern, line):
+            # Это подраздел - добавляем к текущему разделу
+            if current_section is not None:
+                # Извлекаем название подраздела (убираем нумерацию)
+                subsection_title = re.sub(r'^\d+\.\d+\s*', '', line).strip()
+                if subsection_title:
+                    current_section['subsections'].append(subsection_title)
+            # Если нет текущего раздела, игнорируем подраздел
+            continue
+        
+        # Проверяем, является ли это разделом
+        # Разделы: "Глава 1", "Глава 1.", "Раздел 1", "1. Название"
+        section_patterns = [
+            r'^Глава\s+\d+',  # "Глава 1", "Глава 2"
+            r'^Раздел\s+\d+',  # "Раздел 1", "Раздел 2"
+            r'^\d+\.\s+',  # "1. Название", "2. Название"
+        ]
+        
+        is_section = any(re.match(pattern, line, re.IGNORECASE) for pattern in section_patterns)
+        
+        if is_section:
+            # Сохраняем предыдущий раздел
+            if current_section is not None:
+                sections.append(current_section)
+            
+            # Извлекаем название раздела
+            section_title = re.sub(r'^(Глава|Раздел)\s+\d+\.?\s*', '', line, flags=re.IGNORECASE)
+            section_title = re.sub(r'^\d+\.\s*', '', section_title).strip()
+            
+            if section_title:  # Создаем новый раздел только если название не пустое
+                current_section = {
+                    'title': section_title,
+                    'subsections': []
+                }
+        else:
+            # Если строка не является ни разделом, ни подразделом,
+            # но начинается с текста (не пустая), считаем её разделом
+            if current_section is not None:
+                sections.append(current_section)
+            
+            if line:
+                current_section = {
+                    'title': line,
+                    'subsections': []
+                }
+    
+    # Добавляем последний раздел
+    if current_section is not None:
+        sections.append(current_section)
+    
+    return theme, sections
+
+
+# Константа для минимального количества разделов для прямого использования
+MIN_SECTIONS_FOR_DIRECT_USE = 4
+
+async def generate_work_plan(  # noqa: PLR0912, PLR0913
+    order_id: int,
+    model_name: str,
+    theme: str,
+    pages: int,
+    work_type: str,
+    provided_sections: list[dict] | None = None
+) -> str:
     """
     Генерирует план работы через OpenRouter API.
+    
+    Если предоставлены разделы (provided_sections) и их больше 3,
+    использует их напрямую. Если у разделов есть подразделы, они используются.
+    Если разделов меньше 3, просит GPT придумать подразделы для каждого раздела.
     
     Args:
         order_id: ID заказа
@@ -146,27 +248,139 @@ async def generate_work_plan(order_id: int, model_name: str, theme: str, pages: 
         theme: Тема работы
         pages: Количество страниц
         work_type: Тип работы (курсовая, дипломная и т.д.)
+        provided_sections: Опциональный список словарей с разделами и подразделами
+                         Формат: [{'title': 'Название', 'subsections': ['подраздел1', ...]}, ...]
     
     Returns:
         Сгенерированный план работы
     """
-    plan_prompt = (
-        f"Составь подробный план для {work_type.lower()} на тему '{theme}' "
-        f"объемом {pages} страниц. План должен состоять из:\n"
-        f"1. Введение\n"
-        f"2. 3-4 основные главы (каждая с 2-3 подразделами)\n"
-        f"3. Заключение\n"
-        f"4. Список использованных источников\n\n"
-        f"Формат ответа:\n"
-        f"1. Введение\n"
-        f"2. Название первой главы\n"
-        f"   2.1 Подраздел\n"
-        f"   2.2 Подраздел\n"
-        f"3. Название второй главы\n"
-        f"   3.1 Подраздел\n"
-        f"   3.2 Подраздел\n"
-        f"И так далее..."
-    )
+    # Если предоставлены разделы и их больше 3, используем их
+    if provided_sections and len(provided_sections) >= MIN_SECTIONS_FOR_DIRECT_USE:
+        # Формируем план на основе предоставленных разделов
+        sections_text_parts = []
+        for i, section in enumerate(provided_sections):
+            section_title = section.get('title', '')
+            subsections = section.get('subsections', [])
+            
+            if subsections:
+                # Если есть подразделы, используем их
+                subsections_text = "\n".join([f"   {i+1}.{j+1} {sub}" for j, sub in enumerate(subsections)])
+                sections_text_parts.append(f"{i+1}. {section_title}\n{subsections_text}")
+            else:
+                # Если подразделов нет, просим GPT их придумать
+                sections_text_parts.append(f"{i+1}. {section_title}")
+        
+        sections_text = "\n".join(sections_text_parts)
+        
+        # Проверяем, есть ли хотя бы один раздел с подразделами
+        has_subsections = any(section.get('subsections') for section in provided_sections)
+        
+        if has_subsections:
+            plan_prompt = (
+                f"Составь подробный план для {work_type.lower()} на тему '{theme}' "
+                f"объемом {pages} страниц, используя следующую структуру:\n\n"
+                f"{sections_text}\n\n"
+                f"Используй указанные разделы и подразделы. Если у какого-то раздела нет подразделов, "
+                f"добавь для него 2-3 подраздела.\n"
+                f"Также добавь:\n"
+                f"- Введение (в начале)\n"
+                f"- Заключение (перед списком источников)\n"
+                f"- Список использованных источников (в конце)\n\n"
+                f"Формат ответа должен соответствовать указанной структуре."
+            )
+        else:
+            plan_prompt = (
+                f"Составь подробный план для {work_type.lower()} на тему '{theme}' "
+                f"объемом {pages} страниц, используя следующие разделы:\n\n"
+                f"{sections_text}\n\n"
+                f"Для каждого раздела предложи 2-3 подраздела.\n"
+                f"Также добавь:\n"
+                f"- Введение (в начале)\n"
+                f"- Заключение (перед списком источников)\n"
+                f"- Список использованных источников (в конце)\n\n"
+                f"Формат ответа:\n"
+                f"1. Введение\n"
+                f"2. {provided_sections[0].get('title', 'Название первой главы') if provided_sections else 'Название первой главы'}\n"
+                f"   2.1 Подраздел\n"
+                f"   2.2 Подраздел\n"
+                f"3. {provided_sections[1].get('title', 'Название второй главы') if len(provided_sections) > 1 else 'Название второй главы'}\n"
+                f"   3.1 Подраздел\n"
+                f"   3.2 Подраздел\n"
+                f"И так далее для всех разделов..."
+            )
+    elif provided_sections and len(provided_sections) < MIN_SECTIONS_FOR_DIRECT_USE:
+        # Если разделов мало, просим GPT придумать подразделы для каждого
+        sections_text_parts = []
+        for section in provided_sections:
+            section_title = section.get('title', '')
+            subsections = section.get('subsections', [])
+            
+            if subsections:
+                # Если есть подразделы, показываем их
+                subsections_text = "\n".join([f"  - {sub}" for sub in subsections])
+                sections_text_parts.append(f"- {section_title}\n  Подразделы: {subsections_text}")
+            else:
+                sections_text_parts.append(f"- {section_title}")
+        
+        sections_text = "\n".join(sections_text_parts)
+        
+        # Проверяем, есть ли хотя бы один раздел с подразделами
+        has_subsections = any(section.get('subsections') for section in provided_sections)
+        
+        if has_subsections:
+            plan_prompt = (
+                f"Составь подробный план для {work_type.lower()} на тему '{theme}' "
+                f"объемом {pages} страниц.\n\n"
+                f"Используй следующие разделы:\n"
+                f"{sections_text}\n\n"
+                f"Используй указанные подразделы. Если у какого-то раздела нет подразделов, "
+                f"предложи для него 2-3 подраздела.\n"
+                f"Также добавь:\n"
+                f"- Введение (в начале)\n"
+                f"- Заключение (перед списком источников)\n"
+                f"- Список использованных источников (в конце)\n\n"
+                f"Формат ответа должен соответствовать указанной структуре."
+            )
+        else:
+            plan_prompt = (
+                f"Составь подробный план для {work_type.lower()} на тему '{theme}' "
+                f"объемом {pages} страниц.\n\n"
+                f"Используй следующие разделы:\n"
+                f"{sections_text}\n\n"
+                f"Для КАЖДОГО из этих разделов предложи 2-3 подраздела.\n"
+                f"Также добавь:\n"
+                f"- Введение (в начале)\n"
+                f"- Заключение (перед списком источников)\n"
+                f"- Список использованных источников (в конце)\n\n"
+                f"Формат ответа:\n"
+                f"1. Введение\n"
+                f"2. {provided_sections[0].get('title', 'Название первой главы') if provided_sections else 'Название первой главы'}\n"
+                f"   2.1 Подраздел для этого раздела\n"
+                f"   2.2 Еще один подраздел\n"
+                f"3. {provided_sections[1].get('title', 'Название второй главы') if len(provided_sections) > 1 else 'Название второй главы'}\n"
+                f"   3.1 Подраздел для этого раздела\n"
+                f"   3.2 Еще один подраздел\n"
+                f"И так далее для всех разделов..."
+            )
+    else:
+        # Стандартная генерация плана
+        plan_prompt = (
+            f"Составь подробный план для {work_type.lower()} на тему '{theme}' "
+            f"объемом {pages} страниц. План должен состоять из:\n"
+            f"1. Введение\n"
+            f"2. 3-4 основные главы (каждая с 2-3 подразделами)\n"
+            f"3. Заключение\n"
+            f"4. Список использованных источников\n\n"
+            f"Формат ответа:\n"
+            f"1. Введение\n"
+            f"2. Название первой главы\n"
+            f"   2.1 Подраздел\n"
+            f"   2.2 Подраздел\n"
+            f"3. Название второй главы\n"
+            f"   3.1 Подраздел\n"
+            f"   3.2 Подраздел\n"
+            f"И так далее..."
+        )
     
     return await ask_assistant(order_id, plan_prompt, model_name)
 

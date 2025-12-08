@@ -25,6 +25,7 @@ from core.content_generator import (  # noqa: E402
     WorkContentParams,
     generate_work_content_stepwise,
     generate_work_plan,
+    parse_theme_with_sections,
 )
 from core.document_converter import compile_latex_to_pdf, convert_tex_to_docx  # noqa: E402
 from core.latex_template import create_latex_document  # noqa: E402
@@ -76,7 +77,27 @@ async def _generate_test_content(
 ) -> tuple[str, float, float]:
     """Генерирует план и содержание тестовой работы."""
     print("📋 Этап 1/5: Составляю план работы...")
-    plan = await generate_work_plan(order_id, model_name, theme, pages, work_type)
+    
+    # Парсим тему: если она многострочная, извлекаем тему и разделы с подразделами
+    parsed_theme, provided_sections = parse_theme_with_sections(theme)
+    
+    if provided_sections:
+        print(f"   → Найдено разделов: {len(provided_sections)}")
+        for i, section in enumerate(provided_sections, 1):
+            subsections_count = len(section.get('subsections', []))
+            if subsections_count > 0:
+                print(f"      {i}. {section['title']} ({subsections_count} подразделов)")
+            else:
+                print(f"      {i}. {section['title']}")
+    
+    plan = await generate_work_plan(
+        order_id,
+        model_name,
+        parsed_theme,
+        pages,
+        work_type,
+        provided_sections=provided_sections if provided_sections else None
+    )
     print(f"   ✓ План составлен ({len(plan)} символов)")
     print()
     
@@ -85,10 +106,13 @@ async def _generate_test_content(
     async def content_progress_callback(description: str, progress: int):
         print(f"   → {description} ({progress}%)")
     
+    # Используем очищенную тему (без разделов) для генерации содержания
+    parsed_theme, _ = parse_theme_with_sections(theme)
+    
     content_params = WorkContentParams(
         order_id=order_id,
         model_name=model_name,
-        theme=theme,
+        theme=parsed_theme,
         pages=pages,
         work_type=work_type,
         plan_text=plan,
@@ -109,7 +133,9 @@ async def _generate_test_content(
     print()
     
     print("📄 Этап 3/5: Формирую LaTeX документ...")
-    full_tex = create_latex_document(theme, content)
+    # Используем оригинальную тему (первую строку) для заголовка документа
+    parsed_theme, _ = parse_theme_with_sections(theme)
+    full_tex = create_latex_document(parsed_theme, content)
     await save_full_tex(order_id, full_tex)
     print(f"   ✓ LaTeX документ создан ({len(full_tex)} символов)")
     print()
