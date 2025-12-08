@@ -7,6 +7,8 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from aiogram import Bot
+
 from core.latex_template import validate_latex_tags
 from core.page_calculator import (
     calculate_content_pages_for_target,
@@ -15,7 +17,9 @@ from core.page_calculator import (
     parse_work_plan,
     should_generate_subsections,
 )
+from db.database import get_order_info
 from gpt.assistant import ask_assistant
+from utils.admin_logger import send_admin_log
 
 
 @dataclass
@@ -28,6 +32,7 @@ class WorkContentParams:
     work_type: str
     plan_text: str
     progress_callback: Callable | None = None
+    bot: Bot | None = None
 
 
 @dataclass
@@ -39,6 +44,7 @@ class ChapterContentParams:
     theme: str
     target_pages: float
     work_type: str
+    bot: Bot | None = None
 
 
 @dataclass
@@ -50,6 +56,7 @@ class SubsectionsContentParams:
     subsections: list[str]
     target_pages: float
     theme: str
+    bot: Bot | None = None
 
 
 @dataclass
@@ -63,6 +70,7 @@ class MainChaptersGenerationParams:
     pages_per_chapter: dict[str, float]
     content_target_pages: float
     progress_callback: Callable | None = None
+    bot: Bot | None = None
 
 
 @dataclass
@@ -74,6 +82,58 @@ class BibliographyGenerationParams:
     theme: str
     work_type: str
     progress_callback: Callable | None = None
+    bot: Bot | None = None
+
+
+async def _send_validation_warning_to_admin(
+    bot: Bot | None,
+    order_id: int,
+    chapter_title: str,
+    error_msg: str,
+    is_subsection: bool = False
+) -> None:
+    """
+    Отправляет предупреждение администратору о проблемах с валидацией главы/подраздела.
+    
+    Args:
+        bot: Экземпляр бота для отправки сообщения
+        order_id: ID заказа
+        chapter_title: Название главы или подраздела
+        error_msg: Сообщение об ошибке валидации
+        is_subsection: Флаг, указывающий что это подраздел
+    """
+    if not bot:
+        print(f"WARNING: Не удалось отправить предупреждение администратору (bot=None). "
+              f"Заказ #{order_id}, глава '{chapter_title}', ошибка: {error_msg}")
+        return
+    
+    try:
+        order_info = await get_order_info(order_id)
+        if not order_info:
+            return
+        
+        # Создаем фиктивного пользователя для лога
+        class FakeUser:
+            def __init__(self, user_id):
+                self.id = user_id
+                self.full_name = f"User {user_id}"
+                self.username = None
+        
+        fake_user = FakeUser(order_info['user_id'])
+        
+        content_type = "подраздел" if is_subsection else "главу"
+        warning_message = (
+            f"⚠️ <b>Предупреждение: проблема с валидацией {content_type}</b>\n"
+            f"  <b>Заказ:</b> #{order_id}\n"
+            f"  <b>Тема:</b> {order_info['theme'][:100]}\n"
+            f"  <b>{'Подраздел' if is_subsection else 'Глава'}:</b> {chapter_title[:100]}\n"
+            f"  <b>Ошибка:</b> {error_msg[:200]}\n\n"
+            f"<i>Генерация работы продолжается с невалидным контентом.</i>"
+        )
+        
+        await send_admin_log(bot, fake_user, warning_message)
+    except Exception as e:
+        print(f"Failed to send validation warning to admin: {e}")
 
 
 async def generate_work_plan(order_id: int, model_name: str, theme: str, pages: int, work_type: str) -> str:
@@ -144,7 +204,8 @@ async def _generate_main_chapters(params: MainChaptersGenerationParams) -> str:
             chapter_title=chapter_title,
             theme=params.theme,
             target_pages=target_pages,
-            work_type=params.work_type
+            work_type=params.work_type,
+            bot=params.bot
         )
         chapter_content = await generate_chapter_content(chapter_params)
         
@@ -157,7 +218,8 @@ async def _generate_main_chapters(params: MainChaptersGenerationParams) -> str:
                 chapter_title=chapter_title,
                 subsections=chapter['subsections'],
                 target_pages=target_pages - current_chapter_pages,
-                theme=params.theme
+                theme=params.theme,
+                bot=params.bot
             )
             subsections_content = await generate_subsections_content(subsections_params)
             chapter_content += "\n\n" + subsections_content
@@ -188,7 +250,8 @@ async def _generate_bibliography(params: BibliographyGenerationParams) -> str:
         chapter_title=chapter_title,
         theme=params.theme,
         target_pages=0.5,
-        work_type=params.work_type
+        work_type=params.work_type,
+        bot=params.bot
     )
     return await generate_chapter_content(bibliography_params)
 
@@ -210,6 +273,7 @@ async def generate_work_content_stepwise(params: WorkContentParams) -> str:
     work_type = params.work_type
     plan_text = params.plan_text
     progress_callback = params.progress_callback
+    bot = params.bot
     
     try:
         chapters = parse_work_plan(plan_text)
@@ -232,7 +296,8 @@ async def generate_work_content_stepwise(params: WorkContentParams) -> str:
         work_type=work_type,
         pages_per_chapter=pages_per_chapter,
         content_target_pages=content_target_pages,
-        progress_callback=progress_callback
+        progress_callback=progress_callback,
+        bot=bot
     )
     main_content = await _generate_main_chapters(main_chapters_params)
     
@@ -242,7 +307,8 @@ async def generate_work_content_stepwise(params: WorkContentParams) -> str:
         model_name=model_name,
         theme=theme,
         work_type=work_type,
-        progress_callback=progress_callback
+        progress_callback=progress_callback,
+        bot=bot
     )
     bibliography_content = await _generate_bibliography(bibliography_params)
     
@@ -256,15 +322,14 @@ async def generate_chapter_content(params: ChapterContentParams) -> str:
     """
     Генерирует содержание одной главы с валидацией LaTeX тегов.
     При обнаружении незакрытых тегов перегенерирует главу (до 3 попыток).
+    Если после всех попыток глава невалидна, отправляет предупреждение администратору
+    и продолжает генерацию с невалидным контентом.
     
     Args:
         params: Параметры генерации содержания главы
     
     Returns:
-        Содержание главы в формате LaTeX
-    
-    Raises:
-        Exception: Если после 3 попыток не удалось сгенерировать валидную главу
+        Содержание главы в формате LaTeX (может быть невалидным)
     """
     order_id = params.order_id
     model_name = params.model_name
@@ -272,11 +337,16 @@ async def generate_chapter_content(params: ChapterContentParams) -> str:
     theme = params.theme
     target_pages = params.target_pages
     work_type = params.work_type
+    bot = params.bot
     
     MAX_ATTEMPTS = 3
     
     # Определяем тип главы для специальной обработки
     title_lower = chapter_title.lower()
+    
+    # Инициализируем переменные для хранения последнего контента и ошибки
+    last_content = None
+    last_error_msg = None
     
     for attempt in range(MAX_ATTEMPTS):
         if 'введение' in title_lower:
@@ -365,38 +435,42 @@ async def generate_chapter_content(params: ChapterContentParams) -> str:
         if is_valid:
             return chapter_content
         
+        # Сохраняем последний контент и ошибку
+        last_content = chapter_content
+        last_error_msg = error_msg
+        
         # Если невалиден и это не последняя попытка - перегенерируем
         if attempt < MAX_ATTEMPTS - 1:
             print(f"Глава '{chapter_title}': попытка {attempt + 1} невалидна - {error_msg}. Перегенерирую...")
             continue
-        
-        # Если все попытки исчерпаны - выбрасываем исключение
-        error_details = (
-            f"Не удалось сгенерировать валидную главу '{chapter_title}' после {MAX_ATTEMPTS} попыток. "
-            f"Последняя ошибка: {error_msg}"
-        )
-        raise Exception(error_details)
     
-    # Этот код не должен выполняться, но ruff требует явный return
+    # Если все попытки исчерпаны - отправляем предупреждение администратору и продолжаем
     error_details = (
-        f"Не удалось сгенерировать валидную главу '{chapter_title}' после {MAX_ATTEMPTS} попыток."
+        f"Не удалось сгенерировать валидную главу '{chapter_title}' после {MAX_ATTEMPTS} попыток. "
+        f"Последняя ошибка: {last_error_msg}"
     )
-    raise Exception(error_details)
+    
+    print(f"WARNING: {error_details}. Продолжаю генерацию с невалидным контентом.")
+    
+    # Отправляем предупреждение администратору
+    await _send_validation_warning_to_admin(bot, order_id, chapter_title, last_error_msg or "Неизвестная ошибка")
+    
+    # Возвращаем последний сгенерированный контент (даже если он невалиден)
+    return last_content or ""
 
 
 async def generate_subsections_content(params: SubsectionsContentParams) -> str:
     """
     Генерирует содержание подразделов для увеличения объема главы.
     Валидирует LaTeX теги и перегенерирует при необходимости (до 3 попыток).
+    Если после всех попыток подраздел невалиден, отправляет предупреждение администратору
+    и продолжает генерацию с невалидным контентом.
     
     Args:
         params: Параметры генерации содержания подразделов
     
     Returns:
-        Содержание подразделов в формате LaTeX
-    
-    Raises:
-        Exception: Если после 3 попыток не удалось сгенерировать валидный подраздел
+        Содержание подразделов в формате LaTeX (может быть невалидным)
     """
     order_id = params.order_id
     model_name = params.model_name
@@ -404,6 +478,7 @@ async def generate_subsections_content(params: SubsectionsContentParams) -> str:
     subsections = params.subsections
     target_pages = params.target_pages
     theme = params.theme
+    bot = params.bot
     MAX_ATTEMPTS = 3
     
     if not subsections:
@@ -423,6 +498,8 @@ async def generate_subsections_content(params: SubsectionsContentParams) -> str:
     
     for _i, subsection in enumerate(subsections):
         subsection_content = None
+        last_error_msg = None
+        is_valid = False
         
         for attempt in range(MAX_ATTEMPTS):
             subsection_prompt = f"""
@@ -454,19 +531,31 @@ async def generate_subsections_content(params: SubsectionsContentParams) -> str:
             if is_valid:
                 break
             
+            # Сохраняем последнюю ошибку
+            last_error_msg = error_msg
+            
             # Если невалиден и это не последняя попытка - перегенерируем
             if attempt < MAX_ATTEMPTS - 1:
                 print(f"Подраздел '{subsection}': попытка {attempt + 1} невалидна - {error_msg}. Перегенерирую...")
                 continue
-            
-            # Если все попытки исчерпаны - выбрасываем исключение
+        
+        # Если подраздел невалиден после всех попыток - отправляем предупреждение и продолжаем
+        if subsection_content and not is_valid:
             error_details = (
                 f"Не удалось сгенерировать валидный подраздел '{subsection}' для главы '{chapter_title}' "
-                f"после {MAX_ATTEMPTS} попыток. Последняя ошибка: {error_msg}"
+                f"после {MAX_ATTEMPTS} попыток. Последняя ошибка: {last_error_msg}"
             )
-            raise Exception(error_details)
+            print(f"WARNING: {error_details}. Продолжаю генерацию с невалидным контентом.")
+            
+            # Отправляем предупреждение администратору
+            full_subsection_title = f"{chapter_title} / {subsection}"
+            await _send_validation_warning_to_admin(
+                bot, order_id, full_subsection_title, last_error_msg or "Неизвестная ошибка", is_subsection=True
+            )
         
-        subsections_content += subsection_content + "\n\n"
+        # Добавляем контент подраздела (даже если он невалиден)
+        if subsection_content:
+            subsections_content += subsection_content + "\n\n"
     
     return subsections_content.strip()
 

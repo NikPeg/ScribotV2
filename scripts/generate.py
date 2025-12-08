@@ -92,7 +92,8 @@ async def _generate_test_content(
         pages=pages,
         work_type=work_type,
         plan_text=plan,
-        progress_callback=content_progress_callback
+        progress_callback=content_progress_callback,
+        bot=None  # В скрипте нет бота, предупреждения будут только в консоль
     )
     content = await generate_work_content_stepwise(content_params)
     

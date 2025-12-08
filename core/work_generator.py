@@ -164,7 +164,8 @@ async def _generate_large_work(params: LargeWorkGenerationParams) -> str:
         pages=params.pages,
         work_type=params.work_type,
         plan_text=plan,
-        progress_callback=content_progress_callback
+        progress_callback=content_progress_callback,
+        bot=params.bot
     )
     content = await generate_work_content_stepwise(content_params)
     
