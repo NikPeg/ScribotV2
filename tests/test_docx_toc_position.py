@@ -842,3 +842,117 @@ async def test_docx_page_breaks_count(temp_dir, test_theme, test_pages):  # noqa
           f"{page_breaks_count} разрывов страниц (минимум {min_expected_breaks}), "
           f"{sections_count} глав")
 
+
+@pytest.mark.asyncio
+async def test_docx_no_page_breaks_in_list(temp_dir):
+    """
+    Тест: проверяет, что элементы маркированного списка не добавляют разрыв страницы.
+    
+    Проверяет, что в документе с маркированным списком (enumerate) между элементами
+    списка нет разрывов страниц.
+    """
+    if not check_pandoc_available():
+        pytest.skip("Pandoc не установлен. Пропускаем тест генерации DOCX.")
+    
+    from core.document_converter import convert_tex_to_docx  # noqa: E402
+    from core.latex_template import create_latex_document  # noqa: E402
+    
+    # Создаем LaTeX документ с маркированным списком
+    # Используем формат, который может быть конвертирован в нумерованный список с номерами
+    theme = "Тестовая тема"
+    content = """
+\\section{Введение}
+
+Для достижения поставленной цели необходимо решить следующие задачи:
+
+1. Проанализировать исторические аспекты развития видеоигр и геймерской культуры.
+
+2. Изучить основные мотивы, движущие геймерами.
+
+3. Определить влияние видеоигр на социальное поведение.
+
+4. Разработать рекомендации по использованию видеоигр в образовательных целях.
+
+\\section{Основная часть}
+
+Основной текст работы.
+"""
+    
+    # Создаем полный LaTeX документ
+    latex_content = create_latex_document(theme, content, include_toc=False)
+    
+    # Конвертируем в DOCX
+    success, docx_path = await convert_tex_to_docx(
+        latex_content,
+        temp_dir,
+        "test_list"
+    )
+    
+    assert success, f"Не удалось создать DOCX файл: {docx_path}"
+    assert os.path.exists(docx_path), f"DOCX файл должен существовать: {docx_path}"
+    
+    # Открываем DOCX файл
+    doc = Document(docx_path)
+    paragraphs = list(doc.paragraphs)
+    
+    # Находим элементы списка
+    # Ищем параграфы, которые начинаются с номера (1., 2., и т.д.)
+    # и имеют длинный текст (это элементы списка, а не заголовки)
+    list_item_indices = []
+    
+    for i, para in enumerate(paragraphs):
+        text = para.text.strip()
+        # Проверяем, начинается ли текст с номера (1., 2., и т.д.)
+        if text and (re.match(r'^\d+[.)]\s+', text)):
+            # Проверяем, что это длинный текст (элемент списка, а не заголовок)
+            # Элементы списка обычно длиннее заголовков (минимум 30 символов)
+            if len(text) > 30:
+                list_item_indices.append(i)
+    
+    # Сортируем индексы
+    list_item_indices.sort()
+    
+    assert len(list_item_indices) >= 2, (
+        f"Должно быть найдено минимум 2 элемента списка. Найдено: {len(list_item_indices)}. "
+        f"Проверьте, как pandoc конвертирует enumerate."
+    )
+    
+    # Проверяем, что между элементами списка нет разрывов страниц
+    for i in range(len(list_item_indices) - 1):
+        current_idx = list_item_indices[i]
+        next_idx = list_item_indices[i + 1]
+        
+        # Проверяем все параграфы между текущим и следующим элементом списка
+        for para_idx in range(current_idx + 1, next_idx):
+            if para_idx < len(paragraphs):
+                para = paragraphs[para_idx]
+                
+                # Проверяем, нет ли разрыва страницы в этом параграфе
+                has_page_break = False
+                if para.runs:
+                    for run in para.runs:
+                        if hasattr(run, '_element'):
+                            xml = run._element.xml
+                            if 'w:br' in xml and 'w:type="page"' in xml:
+                                has_page_break = True
+                                break
+                
+                # Также проверяем предыдущий параграф (элемент списка) на разрыв страницы
+                if not has_page_break and current_idx < len(paragraphs):
+                    list_para = paragraphs[current_idx]
+                    if list_para.runs:
+                        for run in list_para.runs:
+                            if hasattr(run, '_element'):
+                                xml = run._element.xml
+                                if 'w:br' in xml and 'w:type="page"' in xml:
+                                    has_page_break = True
+                                    break
+                
+                assert not has_page_break, (
+                    f"Найден разрыв страницы между элементами списка на позиции {para_idx}. "
+                    f"Элементы списка: {current_idx} и {next_idx}. "
+                    f"Текст элемента {current_idx}: '{paragraphs[current_idx].text[:60]}...'"
+                )
+    
+    print(f"✓ Проверено {len(list_item_indices)} элементов списка: разрывов страниц между ними не найдено")
+

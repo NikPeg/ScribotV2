@@ -997,7 +997,32 @@ def _add_page_breaks_to_docx(docx_path: str) -> None:  # noqa: PLR0912, PLR0915
             # 2. Проверяем, начинается ли текст с номера секции (1., 2., и т.д.)
             if not is_section and text and (re.match(r'^\d+[.)]\s+[А-ЯЁ]', text) or re.match(r'^\d+[.)]\s+[A-Z]', text)):
                 # Паттерн: число, точка/скобка, пробел, текст
-                is_section = True
+                # Но это может быть элемент списка, а не секция
+                # Проверяем, не является ли это элементом списка:
+                # - Если текст длинный (больше MAX_HEADING_LENGTH), это скорее всего элемент списка
+                # - Если следующий параграф тоже начинается с номера, это список
+                # - Если предыдущий параграф тоже начинается с номера, это список
+                is_list_item = False
+                
+                # Проверка 1: длинный текст - это элемент списка
+                if len(text) > MAX_HEADING_LENGTH:
+                    is_list_item = True
+                
+                # Проверка 2: следующий параграф тоже начинается с номера - это список
+                if not is_list_item and i + 1 < len(paragraphs):
+                    next_text = paragraphs[i + 1].text.strip()
+                    if next_text and (re.match(r'^\d+[.)]\s+', next_text)):
+                        is_list_item = True
+                
+                # Проверка 3: предыдущий параграф тоже начинается с номера - это список
+                if not is_list_item and i > 0:
+                    prev_text = paragraphs[i - 1].text.strip()
+                    if prev_text and (re.match(r'^\d+[.)]\s+', prev_text)):
+                        is_list_item = True
+                
+                # Если это не элемент списка, то это секция
+                if not is_list_item:
+                    is_section = True
             
             # 3. Проверяем, является ли это коротким текстом, который может быть заголовком
             if (not is_section and text and len(text) < MAX_HEADING_LENGTH and text[0].isupper() and
