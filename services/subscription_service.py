@@ -43,8 +43,9 @@ async def check_user_subscription(
             results[channel] = is_subscribed
         except Exception as e:
             logger.error(f"Ошибка при проверке подписки на канал {channel}: {e}")
-            # В случае ошибки считаем, что пользователь не подписан
-            results[channel] = False
+            # В случае ошибки (например, бот не является администратором канала)
+            # считаем, что пользователь подписан
+            results[channel] = True
 
     return results
 
