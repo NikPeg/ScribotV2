@@ -45,16 +45,11 @@ async def process_subscription_check(callback_query: CallbackQuery, bot: Bot):
         if is_subscribed:
             # Пользователь подписан на все каналы
             logger.info(f"USER{user_id}: подписка подтверждена")
-            await callback_query.answer(
-                text="✅ Подписка подтверждена!",
-                show_alert=False
-            )
             # Удаляем сообщение с просьбой подписаться
             await callback_query.message.delete()
-            # Отправляем подтверждение
-            await bot.send_message(
-                chat_id=user_id,
-                text=SUBSCRIPTION_VERIFIED_MESSAGE
+            await callback_query.answer(
+                text="✅ Отлично! Подписка подтверждена.",
+                show_alert=True
             )
             await send_admin_log(bot, callback_query.from_user, "Подтвердил подписку на каналы")
         else:
