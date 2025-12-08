@@ -364,7 +364,6 @@ async def generate_chapter_content(params: ChapterContentParams) -> str:
 Формат: LaTeX (используй \\section{{Введение}} в начале).
 НЕ используй длинные строки - разбивай на короткие (до 80 символов).
 Используй ссылки на источники через команду \\cite{{source1}}, \\cite{{source2}} и т.д. где уместно, но умеренно - по несколько ссылок на страницу.
-ВАЖНО: Если используешь \\begin{{figure}}, обязательно закрой его \\end{{figure}}.
 """
         
         elif 'заключение' in title_lower:
@@ -381,7 +380,6 @@ async def generate_chapter_content(params: ChapterContentParams) -> str:
 Формат: LaTeX (используй \\section{{Заключение}} в начале).
 НЕ используй длинные строки - разбивай на короткие (до 80 символов).
 Используй ссылки на источники через команду \\cite{{source1}}, \\cite{{source2}} и т.д. где уместно, но умеренно - по несколько ссылок на страницу.
-ВАЖНО: Если используешь \\begin{{figure}}, обязательно закрой его \\end{{figure}}.
 """
         
         elif 'список' in title_lower or 'библиография' in title_lower:
@@ -424,7 +422,6 @@ async def generate_chapter_content(params: ChapterContentParams) -> str:
 НЕ используй длинные строки - разбивай на короткие (до 80 символов).
 Можешь включить формулы, таблицы или рисунки где уместно.
 Используй ссылки на источники через команду \\cite{{source1}}, \\cite{{source2}} и т.д. где уместно, но умеренно - по несколько ссылок на страницу.
-ВАЖНО: Если используешь \\begin{{figure}}, обязательно закрой его \\end{{figure}}.
 """
         
         chapter_content = await ask_assistant(order_id, prompt, model_name)
@@ -515,7 +512,6 @@ async def generate_subsections_content(params: SubsectionsContentParams) -> str:
 - НЕ используй длинные строки - разбивай на короткие (до 80 символов)
 - Пиши академический текст с примерами и анализом
 - Используй ссылки на источники через команду \\cite{{source1}}, \\cite{{source2}} и т.д. где уместно, но умеренно - по несколько ссылок на страницу
-- ВАЖНО: Если используешь \\begin{{figure}}, обязательно закрой его \\end{{figure}}
 
 Начни с команды \\subsection{{{subsection}}} и продолжи содержанием.
 """
