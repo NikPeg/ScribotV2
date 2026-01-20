@@ -225,9 +225,10 @@ permission denied while trying to connect to the Docker daemon socket at unix://
 2. **Настройка sudo без пароля для docker команд**
    - Для работы GitHub Actions необходимо настроить sudo без пароля для команд docker:
      ```bash
-     yc compute ssh --id <instance-id> "echo 'ubuntu ALL=(ALL) NOPASSWD: /usr/bin/docker, /usr/bin/docker-compose' | sudo tee /etc/sudoers.d/docker-ubuntu"
+     yc compute ssh --id <instance-id> "echo 'ubuntu ALL=(ALL) NOPASSWD: /usr/bin/docker' | sudo tee /etc/sudoers.d/docker-ubuntu"
      ```
    - Это позволяет пользователю `ubuntu` выполнять команды docker через sudo без ввода пароля.
+   - **Примечание:** `docker compose` - это подкоманда `docker`, поэтому отдельно её добавлять не нужно.
 
 3. **Проверка прав на Docker socket**
    - Убедитесь, что `/var/run/docker.sock` имеет правильные права:

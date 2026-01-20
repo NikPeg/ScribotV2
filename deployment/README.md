@@ -45,13 +45,13 @@ python main.py
 
 ```bash
 cd deployment
-docker-compose up -d
+docker compose up -d
 ```
 
 Или из корневой директории проекта:
 
 ```bash
-docker-compose -f deployment/docker-compose.yml up -d
+docker compose -f deployment/docker-compose.yml up -d
 ```
 
 ## Примечания

@@ -85,14 +85,14 @@ sudo snap restart docker
 sudo docker rm -f <container_id>
 ```
 
-#### Метод 2: Удаление через docker-compose
+#### Метод 2: Удаление через docker compose
 
-Если контейнер был запущен через docker-compose:
+Если контейнер был запущен через docker compose:
 
 ```bash
 cd ~/ScribotV2/deployment
-sudo docker-compose -f docker-compose.yml down --remove-orphans
-sudo docker-compose -f docker-compose.prod.yml down --remove-orphans
+sudo docker compose -f docker-compose.yml down --remove-orphans
+sudo docker compose -f docker-compose.prod.yml down --remove-orphans
 ```
 
 #### Метод 3: Проверка и удаление всех связанных ресурсов
@@ -122,9 +122,9 @@ sudo docker rm -f $(sudo docker ps -a -q --filter name=scribot_bot) 2>/dev/null 
    sudo docker stop --timeout=10 <container_id>
    ```
 
-3. **Используйте docker-compose для управления контейнерами:**
+3. **Используйте docker compose для управления контейнерами:**
    ```bash
-   sudo docker-compose down --timeout 10
+   sudo docker compose down --timeout 10
    ```
 
 4. **Регулярно проверяйте и очищайте неиспользуемые ресурсы:**
