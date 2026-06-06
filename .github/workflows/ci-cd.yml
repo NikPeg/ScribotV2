@@ -175,6 +175,11 @@ jobs:
           # ⚠️ Список должен совпадать с именами переменных в env выше (кроме NEW_IMAGE и BACKUP_IMAGE - они вычисляются)
           envs: BOT_TOKEN,CHANNEL_URL,FEEDBACK_URL,SOS_URL,ADMIN_ID,LOG_LEVEL,REQUIRED_CHANNELS,BASE_PRICE,PROMOTION_TEXT,LLM_TOKEN,YC_REGISTRY_ID,YC_SA_JSON_CREDENTIALS,NEW_IMAGE,BACKUP_IMAGE
           script: |
+            if [ ! -d ~/ScribotV2 ]; then
+              git clone https://github.com/NikPeg/ScribotV2.git ~/ScribotV2
+            else
+              git -C ~/ScribotV2 pull origin main
+            fi
             cd ~/ScribotV2/deployment
             chmod +x deploy.sh
             ./deploy.sh
